@@ -1,0 +1,207 @@
+# Sendtrap Community CI.
+#
+# Branch protection: the required status-check CONTEXTS for main are the job
+# names below, with matrix jobs expanded per cell:
+#   "tests (8.3)", "tests (8.4)", "frontend", "arch", "pint", "phpstan",
+#   "sqlite-backup-restore", "secret-scan", "license-check", "dco"
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - run: composer validate --strict
+      # Installs sendtrap/core like any consumer (from the committed lock),
+      # continuously proving the clean-clone build.
+      - run: composer install --no-interaction --no-progress
+      - run: php artisan test
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      # vitest's pretest hook runs `php artisan ziggy:generate`, so the PHP
+      # app must be installed before the front-end suite.
+      - run: composer install --no-interaction --no-progress
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  # The no-Cloud architecture boundary test on its own fast job so a
+  # boundary regression is surfaced by name, not buried in the matrix.
+  arch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --no-interaction --no-progress
+      - run: vendor/bin/phpunit tests/Feature/Slice7NoCloudArchTest.php
+
+  pint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --no-interaction --no-progress
+      - run: vendor/bin/pint --test
+
+  # Gate-review batch-2 #5: proves the docker/README.md "Backup"/"Restore"
+  # sqlite3-CLI commands are actually correct. Needs only the sqlite3 CLI
+  # (ubuntu-latest ships it) — no Docker host required, unlike
+  # scripts/container-e2e.sh which exercises the same commands inside the
+  # real image (D-20, owner-run).
+  sqlite-backup-restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/sqlite-backup-restore-test.sh
+
+  # Gate-review batch-2 #4: static analysis, REQUIRED to stay green. Level 1
+  # (raised from 0 after adding config/sendtrap-community.php ci/instance
+  # keys to fix two real larastan.noEnvCallsOutsideOfConfig findings) with a
+  # scoped, documented ignoreErrors exception for the two CI-bootstrap
+  # commands (see phpstan.neon.dist for the full rationale) — NOT a blanket
+  # baseline.
+  phpstan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --no-interaction --no-progress
+      - run: vendor/bin/phpstan analyse --no-progress
+
+  # Direct gitleaks CLI invocation (pinned release), NOT gitleaks-action:
+  # the action gates features on an org licence key; the plain CLI is
+  # deterministic and dependency-free. Defence-in-depth behind the
+  # pre-publication scanner.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install pinned gitleaks
+        run: |
+          set -euo pipefail
+          GITLEAKS_VERSION=8.18.4
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -C /tmp -xzf /tmp/gitleaks.tar.gz gitleaks
+          install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - run: gitleaks detect --source . --redact --no-banner --exit-code 1
+
+  # Flags vulnerable or newly-added dependencies on PRs (diff-based, so PR
+  # events only — do not add to required contexts for pushes).
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+
+  # Keep the dependency tree on a permissive-license allowlist. Mirrors the
+  # job of the same name in the sendtrap/core repo's CI.
+  license-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --no-interaction --no-progress
+      - name: Check dependency licenses against the allowlist
+        run: |
+          composer licenses --format=json | php -r '
+            $allow = ["MIT", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "ISC", "LGPL-2.1-only", "LGPL-2.1-or-later", "LGPL-3.0-only", "LGPL-3.0-or-later", "Unlicense", "CC0-1.0"];
+            $data = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
+            $bad = [];
+            foreach ($data["dependencies"] as $pkg => $info) {
+                $licenses = $info["license"] ?? [];
+                if ($licenses === [] || array_intersect($licenses, $allow) === []) {
+                    $bad[$pkg] = $licenses;
+                }
+            }
+            if ($bad !== []) {
+                fwrite(STDERR, "Disallowed/unknown licenses:\n");
+                foreach ($bad as $pkg => $l) { fwrite(STDERR, "  $pkg: ".json_encode($l)."\n"); }
+                exit(1);
+            }
+            echo "All dependency licenses on the allowlist.\n";
+          '
+
+  # DCO: every commit in the push/PR must carry a Signed-off-by trailer
+  # (CONTRIBUTING.md documents `git commit -s`). Inline check — no app
+  # install required (the org may additionally enable the DCO GitHub App).
+  dco:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check Signed-off-by on every commit
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            COMMITS="$(git rev-list "$BASE..$HEAD_SHA")"
+          elif [ -n "${BEFORE:-}" ] && git cat-file -e "$BEFORE" 2>/dev/null; then
+            COMMITS="$(git rev-list "$BEFORE..$HEAD_SHA")"
+          else
+            # New branch / initial push: check the pushed head commit.
+            COMMITS="$HEAD_SHA"
+          fi
+          FAIL=0
+          for c in $COMMITS; do
+            if ! git show -s --format=%B "$c" | grep -Eqi '^Signed-off-by: .+ <.+@.+>'; then
+              echo "Missing Signed-off-by: $c ($(git show -s --format=%s "$c"))"
+              FAIL=1
+            fi
+          done
+          if [ "$FAIL" -ne 0 ]; then
+            echo 'Add sign-offs with `git commit -s` (see CONTRIBUTING.md).'
+            exit 1
+          fi
+          echo "All commits carry a Signed-off-by trailer."

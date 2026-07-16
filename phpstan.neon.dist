@@ -1,0 +1,30 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 1
+    paths:
+        - app
+    tmpDir: build/phpstan
+
+    # Scoped, documented exception (gate-review batch-2, item #4) — NOT a
+    # blanket baseline. larastan.noEnvCallsOutsideOfConfig flags env() calls
+    # outside config/*.php because they read null once config:cache has run.
+    # These two commands are a deliberate, tested exception: the container
+    # bootstrap (docker/rootfs/usr/local/bin/sendtrap-bootstrap) ALWAYS
+    # exports SENDTRAP_CI_*/SENDTRAP_INSTANCE_ALLOWED_IPS as real process env
+    # vars (not merely .env-file entries) before config:cache runs, so env()
+    # keeps resolving them correctly post-cache. Routing them through config()
+    # instead would break the documented ability to re-supply these values at
+    # command-invocation time within one process — exactly what
+    # tests/Feature/Slice8bCiSeedTest.php exercises (putenv() between two
+    # Artisan::call() invocations in the same test). Converting to config()
+    # was tried and reverted because it broke that test; see the gate-review
+    # report for the full analysis.
+    ignoreErrors:
+        -
+            identifier: larastan.noEnvCallsOutsideOfConfig
+            path: app/Console/Commands/CiSeedCommand.php
+        -
+            identifier: larastan.noEnvCallsOutsideOfConfig
+            path: app/Console/Commands/InstallCommand.php

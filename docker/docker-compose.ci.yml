@@ -1,0 +1,78 @@
+# Sendtrap Community — EPHEMERAL CI PROFILE (Plan 06 Phase 8b, §5.1).
+#
+# A MODE of the durable Phase 7 image (same image, not a second one), selected
+# by SENDTRAP_MODE=ci. It stores NO data: /data is a tmpfs, there is NO named
+# volume, and everything is thrown away on teardown. Uses WELL-KNOWN DEFAULT
+# credentials — never publish :1025 / :8080 to a public interface; bind them
+# only on an isolated CI network.
+#
+# Zero-config: `docker compose -f docker/docker-compose.ci.yml up -d` boots to
+# /up-ready with the documented default creds (ci / ci-smtp-password /
+# ci-api-token, project CI, inbox ci). Override any SENDTRAP_CI_* for
+# uniqueness (see docker/.env.ci.example).
+#
+# Equivalent one-liner (the canonical §5.0 flag set, used VERBATIM):
+#
+#   docker run --rm \
+#     -e SENDTRAP_MODE=ci \
+#     -e APP_URL=http://localhost:8080 \
+#     --tmpfs /data --tmpfs /tmp --tmpfs /run:rw,exec,nosuid,nodev,mode=755 \
+#     --tmpfs /app/bootstrap/cache --tmpfs /app/storage/framework --tmpfs /app/storage/logs \
+#     --read-only \
+#     --cap-drop ALL \
+#     --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add FOWNER --cap-add KILL \
+#     --security-opt no-new-privileges:true \
+#     -p 8080:8080 -p 1025:1025 \
+#     ghcr.io/sendtraphq/sendtrap-community:latest
+
+services:
+  sendtrap:
+    image: ${SENDTRAP_IMAGE:-ghcr.io/sendtraphq/sendtrap-community:latest}
+    environment:
+      SENDTRAP_MODE: ci
+      APP_URL: "${APP_URL:-http://localhost:8080}"
+      # Deterministic credential contract (§2.3). All optional — the CI branch
+      # supplies these documented defaults when unset.
+      SENDTRAP_CI_SMTP_USERNAME: "${SENDTRAP_CI_SMTP_USERNAME:-ci}"
+      SENDTRAP_CI_SMTP_PASSWORD: "${SENDTRAP_CI_SMTP_PASSWORD:-ci-smtp-password}"
+      SENDTRAP_CI_API_TOKEN: "${SENDTRAP_CI_API_TOKEN:-ci-api-token}"
+      SENDTRAP_CI_PROJECT: "${SENDTRAP_CI_PROJECT:-CI}"
+      SENDTRAP_CI_INBOX: "${SENDTRAP_CI_INBOX:-ci}"
+      # Forwarding OFF (triple-defended; the entrypoint also forces these, so
+      # these lines are documentation of the guarantee, not the mechanism).
+      SENDTRAP_FORWARDS_PER_MONTH: "0"     # D-17: 0 = forwarding blocked
+      MAIL_MAILER: log
+    ports:
+      - "8080:8080"     # API + /up
+      - "1025:1025"     # SMTP ingestion
+    # The canonical writable surface (§5.0) — the COMPLETE tmpfs set. Omitting
+    # any of these under read_only hits EROFS at config:cache / package:discover
+    # (/app/bootstrap/cache) or /data prep. CI adds /data (tmpfs, not a volume).
+    tmpfs:
+      - /data             # DB + storage + app.key — ALL state in RAM, gone on stop
+      - /tmp
+      - "/run:rw,exec,nosuid,nodev,mode=755" # s6 tree + pid/socket + CI contract
+      - /app/bootstrap/cache
+      - /app/storage/framework
+      - /app/storage/logs
+    read_only: true
+    cap_drop:
+      - ALL
+    # CI ephemeral minimum (§5.0). DAC_OVERRIDE is intentionally OMITTED — it is
+    # only needed to read a PRIOR boot's chmod-600 /data/app.key, which never
+    # exists on a fresh tmpfs /data. Add it back only for an acked persistent
+    # /data + fixed APP_KEY run.
+    cap_add:
+      - CHOWN             # bootstrap: chown -R sendtrap:sendtrap /data (first boot)
+      - SETUID            # nginx/FPM + s6-setuidgid: drop request/app workers to uid 1000
+      - SETGID            # nginx/FPM + s6-setuidgid: drop request/app workers to gid 1000
+      - FOWNER            # bootstrap: chmod 600 /data/app.key on the uid-1000 key (first boot, set -eu)
+      - KILL              # s6 supervisor forwards SIGTERM/SIGKILL to uid-1000 children
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "sendtrap-healthcheck"]   # /up 200 AND SMTP 220 banner
+      interval: 5s
+      timeout: 4s
+      retries: 20
+      start_period: 30s

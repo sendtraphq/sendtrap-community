@@ -1,0 +1,55 @@
+# Sendtrap Community — GitHub Actions CI example (Plan 06 Phase 8b, §6.1).
+#
+# Runs the CI profile as a SERVICE CONTAINER: GitHub manages its lifecycle and
+# network isolation and drops no caps, so there is nothing to "add back" here —
+# the canonical --read-only/cap_drop flag set applies only to a hand-written
+# `docker run` (see docker-run.sh). A job that WANTS the hardened shape can
+# pass the §5.0 flags via the service `options:`.
+#
+# Flow: start service -> wait /up -> app-under-test sends SMTP to localhost:1025
+# (AUTH ci / ci-smtp-password) -> assert via the CURRENT API (POST
+# /api/v1/assert, Bearer ci-api-token) -> GitHub disposes the service (ephemeral).
+
+name: Email tests
+
+on: [push, pull_request]
+
+jobs:
+  email-tests:
+    runs-on: ubuntu-latest
+    services:
+      sendtrap:
+        image: ghcr.io/sendtraphq/sendtrap-community:latest
+        env:
+          SENDTRAP_MODE: ci
+          APP_URL: http://localhost:8080
+          SENDTRAP_CI_SMTP_USERNAME: ci
+          SENDTRAP_CI_SMTP_PASSWORD: ci-smtp-password
+          SENDTRAP_CI_API_TOKEN: ci-api-token
+        ports:
+          - 8080:8080
+          - 1025:1025
+        options: >-
+          --health-cmd sendtrap-healthcheck
+          --health-interval 5s --health-timeout 4s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Readiness: GitHub waits for the service health-cmd before steps run;
+      # this explicit /up poll is belt-and-suspenders.
+      - name: Wait for Sendtrap
+        run: for i in $(seq 1 30); do curl -fsS http://localhost:8080/up && break; sleep 2; done
+
+      # Your app under test sends mail to localhost:1025 with the fixed creds.
+      #   MAIL_HOST=localhost MAIL_PORT=1025 MAIL_USERNAME=ci MAIL_PASSWORD=ci-smtp-password
+      - name: Run the app that sends mail
+        run: ./run-app-that-sends-mail.sh
+
+      # Assert via the CURRENT API (POST /api/v1/assert busy-waits up to timeout).
+      - name: Assert the email arrived
+        run: |
+          curl -fsS -X POST http://localhost:8080/api/v1/assert \
+            -H "Authorization: Bearer ci-api-token" \
+            -H "Content-Type: application/json" -H "Accept: application/json" \
+            -d '{"subject_contains":"Welcome","timeout":15}' \
+          | tee /dev/stderr | grep -q '"matched":true'

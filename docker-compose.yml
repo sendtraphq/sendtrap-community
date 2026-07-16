@@ -1,0 +1,120 @@
+# Sendtrap Community — the "one documented command" (Plan 06 Phase 7 §10).
+#
+#   docker compose up -d
+#
+# starts a single durable service on SQLite + local storage + the DB queue,
+# with one named volume holding all state. Front it with a TLS-terminating
+# reverse proxy in production. External MySQL/Redis are opt-in profiles.
+#
+# Copy docker/.env.example to .env and edit it first (admin creds + APP_URL).
+
+services:
+  sendtrap:
+    # Release: pull the published image. For a LOCAL build see docker/README.md
+    # (the build needs the core-mirror build-context) — build it and tag it
+    # sendtrap/community:local, or uncomment `build:` below.
+    image: ${SENDTRAP_IMAGE:-ghcr.io/sendtraphq/sendtrap-community:latest}
+    # build:
+    #   context: .
+    #   additional_contexts:
+    #     core-mirror: /path/to/sendtrap-core-mirror.git
+    #   args:
+    #     CORE_SOURCE: mirror   # selects the core-src-mirror stage (Dockerfile
+    #                           # BUILD SOURCE comment) — required alongside
+    #                           # the core-mirror context above, or the build
+    #                           # ignores it and copies an empty dir (release
+    #                           # default CORE_SOURCE=published).
+    restart: unless-stopped
+    ports:
+      # Host ports are overridable (defaults 80 / 1025) so the same file works
+      # for the documented one-command start and for the e2e harness.
+      - "${SENDTRAP_WEB_PORT:-80}:8080"          # web UI + REST API (TLS proxy in front in prod)
+      - "${SENDTRAP_SMTP_HOST_PORT:-1025}:1025"  # SMTP ingestion — what your app SENDS mail to
+    environment:
+      APP_URL: "${APP_URL:-http://localhost}"
+      APP_ENV: production
+      APP_DEBUG: "false"
+      # APP_KEY: "${APP_KEY:-}"     # omit to auto-persist to /data/app.key
+      SENDTRAP_ADMIN_NAME: "${SENDTRAP_ADMIN_NAME:-}"
+      SENDTRAP_ADMIN_EMAIL: "${SENDTRAP_ADMIN_EMAIL:-}"
+      SENDTRAP_ADMIN_PASSWORD: "${SENDTRAP_ADMIN_PASSWORD:-}"
+      SENDTRAP_WORKSPACE_NAME: "${SENDTRAP_WORKSPACE_NAME:-Sendtrap}"
+      SENDTRAP_PUBLIC_HOST: "${SENDTRAP_PUBLIC_HOST:-localhost}"
+      # --- external backends: uncomment + enable the matching profile ---
+      # DB_CONNECTION: mysql
+      # DB_HOST: db
+      # DB_DATABASE: sendtrap
+      # DB_USERNAME: sendtrap
+      # DB_PASSWORD: sendtrap
+      # QUEUE_CONNECTION: redis
+      # CACHE_STORE: redis
+      # SESSION_DRIVER: redis
+      # REDIS_HOST: redis
+    volumes:
+      - sendtrap-data:/data
+    # Hardened defaults (§1.5/§9): read-only rootfs + tmpfs scratch, drop-all
+    # capabilities with the minimum added back, no privilege escalation.
+    # bootstrap/cache + storage/framework are written at every boot
+    # (config:cache etc., §4), so they MUST be writable tmpfs. storage/logs
+    # is also tmpfs as cheap insurance: LOG_CHANNEL=stderr is the frozen
+    # default so nothing writes there today, but an operator overriding it to
+    # daily/single must not hit EROFS on the read-only root.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - "/run:rw,exec,nosuid,nodev,mode=755"
+      - /app/bootstrap/cache
+      - /app/storage/framework
+      - /app/storage/logs
+    cap_drop:
+      - ALL
+    # The container starts as root so bootstrap can prepare /data. The minimal
+    # nginx/FPM masters stay container-root only long enough to manage and log;
+    # their request workers plus SMTP/queue/scheduler run as uid 1000. See
+    # docker/README.md "Capabilities"; do not add capabilities without updating it.
+    cap_add:
+      - CHOWN         # bootstrap: chown -R sendtrap:sendtrap /data + tmpfs dirs
+      - SETUID        # nginx/FPM + s6-setuidgid: drop request/app workers to uid 1000
+      - SETGID        # nginx/FPM + s6-setuidgid: drop request/app workers to gid 1000
+      - DAC_OVERRIDE  # bootstrap (still root) reads/writes files already
+                      # owned by uid 1000 across boots (e.g. cat'ing the
+                      # chmod-600 /data/app.key written by a prior boot)
+      - FOWNER        # bootstrap chmod's directories/files that a PRIOR
+                      # boot's chown already handed to uid 1000 (e.g. the
+                      # sendtrap-tls dir's chmod 700 on every boot after
+                      # the first)
+      - KILL          # s6 supervisor (root) forwards SIGTERM/SIGKILL into
+                      # child processes running as uid 1000 on shutdown/restart
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "sendtrap-healthcheck"]   # /up 200 AND SMTP 220 banner
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  # Optional external MySQL — `docker compose --profile mysql up -d` and set the
+  # DB_* env above. The runtime image already carries pdo_mysql (no rebuild).
+  db:
+    image: mysql:8
+    profiles: ["mysql"]
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: sendtrap
+      MYSQL_USER: sendtrap
+      MYSQL_PASSWORD: sendtrap
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    volumes:
+      - sendtrap-db:/var/lib/mysql
+
+  # Optional external Redis — `docker compose --profile redis up -d` and set the
+  # QUEUE/CACHE/SESSION + REDIS_* env above.
+  redis:
+    image: redis:7-alpine
+    profiles: ["redis"]
+    restart: unless-stopped
+
+volumes:
+  sendtrap-data:
+  sendtrap-db:

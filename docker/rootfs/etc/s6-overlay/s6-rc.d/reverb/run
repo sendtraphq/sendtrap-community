@@ -1,0 +1,2 @@
+#!/command/with-contenv sh
+exec s6-setuidgid sendtrap php /app/artisan reverb:start --host=127.0.0.1 --port=9090

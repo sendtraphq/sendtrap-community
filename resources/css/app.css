@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+[x-cloak] {
+    display: none;
+}
+
+/*
+ * Plan 06 Phase 4b design §7.4: the custom utilities the sendtrap/core
+ * package components reference (`bg-gradient-brand`, `glass`, …) — these
+ * are CSS-layer tokens, not tailwind.config.js theme entries, so they
+ * must be declared by every host that mounts the package UI.
+ */
+@layer utilities {
+    /* Gradient brand text — navy → bright blue */
+    .text-gradient {
+        @apply bg-clip-text text-transparent;
+        background-image: linear-gradient(120deg, #1e40af, #2563eb, #3b82f6);
+    }
+
+    .bg-gradient-brand {
+        background-image: linear-gradient(120deg, #1d4ed8, #2563eb, #3b82f6);
+    }
+
+    /* Frosted glass surface */
+    .glass {
+        background: rgba(255, 255, 255, 0.7);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.6);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .animate-shine,
+    .animate-fade-up {
+        animation: none !important;
+    }
+}
+
+/* Nicer scrollbars — thin, rounded, subtle; darken on hover */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 116, 139, 0.35) transparent;
+}
+*::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+    background-color: rgba(100, 116, 139, 0.3);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(100, 116, 139, 0.55);
+}

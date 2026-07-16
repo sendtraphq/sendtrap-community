@@ -1,0 +1,41 @@
+# Sendtrap Community — GitLab CI example (Plan 06 Phase 8b, §6.2).
+#
+# Runs the CI profile as a `services:` container reached by its alias
+# `sendtrap`. GitLab manages the service lifecycle + network isolation and
+# drops no caps, so the canonical --read-only/cap_drop flag set does not apply
+# here (it is only for a hand-written `docker run`, see docker-run.sh).
+#
+# Flow: start service -> wait /up -> app-under-test sends SMTP to sendtrap:1025
+# (AUTH ci / ci-smtp-password) -> assert via GET /api/v1/messages?wait= (Bearer
+# ci-api-token) -> GitLab tears down the service after the job (ephemeral).
+
+email-tests:
+  image: curlimages/curl:latest        # or your app-under-test image
+  services:
+    - name: ghcr.io/sendtraphq/sendtrap-community:latest
+      alias: sendtrap
+      variables:
+        SENDTRAP_MODE: "ci"
+        APP_URL: "http://sendtrap:8080"
+        SENDTRAP_CI_SMTP_USERNAME: "ci"
+        SENDTRAP_CI_SMTP_PASSWORD: "ci-smtp-password"
+        SENDTRAP_CI_API_TOKEN: "ci-api-token"
+  variables:
+    SMTP_HOST: "sendtrap"              # reach the service by alias
+    SMTP_PORT: "1025"
+    SENDTRAP_API: "http://sendtrap:8080/api/v1"
+  script:
+    - for i in $(seq 1 30); do curl -fsS "http://sendtrap:8080/up" && break; sleep 2; done
+    # Your app under test sends to sendtrap:1025 (AUTH ci / ci-smtp-password).
+    - ./run-app-that-sends-mail.sh
+    # Assert via GET /messages?wait= (busy-waits up to N until a match appears).
+    # Extract the actual "subject" VALUE and require it contains "Welcome" —
+    # a bare `grep -q '"subject"'` only proves the JSON shape has that key
+    # (true even for an unrelated/empty result), not that a message actually
+    # matched. This mirrors the GitHub/docker-run examples' `matched:true`
+    # check, applied to the value this endpoint returns instead.
+    - |
+      BODY="$(curl -fsS "$SENDTRAP_API/messages?wait=15&subject_contains=Welcome" \
+        -H "Authorization: Bearer ci-api-token" -H "Accept: application/json")"
+      echo "$BODY" | grep -oE '"subject":"[^"]*"' | grep -q "Welcome" \
+        || { echo "no message with a matching subject found: $BODY"; exit 1; }

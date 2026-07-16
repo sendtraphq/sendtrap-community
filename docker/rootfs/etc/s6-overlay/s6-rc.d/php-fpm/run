@@ -1,0 +1,4 @@
+#!/command/with-contenv sh
+# The FPM master opens the inherited container log descriptors, then the pool
+# configuration drops every request worker to `sendtrap`.
+exec php-fpm -F

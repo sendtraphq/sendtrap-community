@@ -1,0 +1,66 @@
+# Docker build context excludes (Plan 06 Phase 7 §1.1 / slice 7b-1).
+#
+# The build context honors THIS file, not .gitignore. The critical entries are
+# composer.local.json / composer.local.lock — the .gitignore'd, untracked dev
+# override that points sendtrap/core at a host path unreachable inside the
+# build; a naive `COPY .` would leak them and break `composer install`.
+#
+# NOTE: `packages/` is deliberately NOT listed — the Community repo has no such
+# directory (it consumes sendtrap/core via vendor/). It is a Cloud-worktree
+# artifact only.
+
+# Dev dependency override (MUST be excluded — would break composer install)
+composer.local.json
+composer.local.lock
+
+# Secrets / local env
+.env
+.env.*
+auth.json
+
+# VCS + CI + tooling metadata
+.git
+.gitattributes
+.github
+.editorconfig
+.phpactor.json
+.phpunit.result.cache
+.phpunit.cache
+.idea
+.vscode
+.zed
+.nova
+.cursor
+.codex
+
+# Installed dependencies (vendor comes from the vendor stage; node_modules
+# from `npm ci` in the assets stage)
+vendor
+node_modules
+
+# Built assets (rebuilt in the assets stage)
+public/build
+public/hot
+public/storage
+
+# Runtime state / persistence (never bake into the image)
+data
+/data
+storage/logs
+storage/pail
+storage/*.key
+storage/framework/cache
+storage/framework/sessions
+storage/framework/views
+storage/framework/testing
+
+# Tests + coverage (not needed in a --no-dev runtime image)
+tests
+coverage
+
+# Container build outputs / docs that don't belong in the app layer
+docker/README.md
+
+# OS cruft
+.DS_Store
+Thumbs.db

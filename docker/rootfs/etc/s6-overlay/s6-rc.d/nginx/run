@@ -1,0 +1,5 @@
+#!/command/with-contenv sh
+# Keep only nginx's minimal master as container root; nginx.conf drops every
+# request worker to `sendtrap`. `-e stderr` bypasses Alpine's compiled
+# /var/lib/nginx log path before nginx has parsed our configuration.
+exec nginx -e stderr -c /etc/nginx/nginx.conf

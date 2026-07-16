@@ -1,0 +1,2 @@
+#!/command/with-contenv sh
+exec s6-setuidgid sendtrap php /app/artisan queue:work --sleep=1 --tries=3 --max-time=3600

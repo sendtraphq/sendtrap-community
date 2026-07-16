@@ -1,0 +1,283 @@
+# Sendtrap Community — container build + supply chain (Plan 06 Phase 7 §9 / 7b-5).
+#
+# Builds the multi-arch durable image, generates an SBOM + SLSA provenance,
+# scans it (trivy) as a gate, and — ONLY on a version tag and ONLY when the
+# publish gate is satisfied — pushes to GHCR and cosign-signs it (keyless).
+#
+# RELEASE-GATED: pushing/signing require the `release` environment AND the
+# repo variable PUBLISH_CONTAINER == 'true'. Until an owner opts in, every run
+# builds + scans locally and publishes NOTHING. Keys are owner-supplied; this
+# workflow generates none.
+#
+# TWO JOBS (gate-review batch-2 #6 — `environment: release` on the
+# publish-gated job): build-scan always runs (every PR gets a free scan-only
+# build + both e2e suites, no approval needed); publish is a SEPARATE job,
+# `needs: build-scan`, gated by BOTH `if: needs.build-scan.outputs.publish
+# == 'true'` (the pre-existing repo-variable + tag-push logic, unchanged)
+# AND `environment: release` (NEW — a protected GitHub environment an owner
+# configures with required reviewers/wait timer, so publishing a real
+# release needs a human approval gate, not just a variable flag). Splitting
+# into two jobs is what makes this possible: `environment:` applies to an
+# entire job, so putting it on the single job used to run everything would
+# have forced every PR build through the same approval gate it was meant to
+# reserve for real publishes.
+#
+# PREREQUISITE (§1.1 MEDIUM-4): the image build resolves sendtrap/core. On a
+# public runner this REQUIRES composer.json's `repositories` to point at the
+# PUBLISHED core (Phase 6). The local-mirror build-context used for dev builds
+# is not available in CI and is intentionally not referenced here.
+#
+# CONFIRMED (gate-review batch-2 BLOCKER #2): every docker/build-push-action
+# step below passes build-args SOURCE_REPO_URL/PRODUCT_URL/IMAGE_VERSION only
+# — none sets CORE_SOURCE or additional_contexts.core-mirror. The Dockerfile's
+# `ARG CORE_SOURCE=published` default therefore applies here, so the
+# `core-src-mirror` stage (and the "core-mirror" build context it needs) is
+# never resolved by BuildKit on this workflow's builds — a release build
+# needs, and gets, NO core-mirror context.
+
+name: Container Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "docker/**"
+      - ".github/workflows/container-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+  # OCI url/documentation label for the released image. Defaults to the
+  # source repo; the owner may repoint it at the public product/docs site.
+  PRODUCT_URL: https://github.com/${{ github.repository }}
+
+jobs:
+  build-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.gate.outputs.publish }}
+      tags: ${{ steps.meta.outputs.tags }}
+      labels: ${{ steps.meta.outputs.labels }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide whether to publish
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] \
+             && [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ] \
+             && [ "${{ vars.PUBLISH_CONTAINER }}" = "true" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@v3      # arm64 emulation for buildx
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Image metadata (tags + OCI labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=pr
+            type=sha
+          labels: |
+            org.opencontainers.image.title=Sendtrap Community
+            org.opencontainers.image.description=Self-hosted, single-workspace email sandbox (SMTP catcher + REST API).
+            org.opencontainers.image.url=${{ env.PRODUCT_URL }}
+            org.opencontainers.image.documentation=${{ env.PRODUCT_URL }}
+            org.opencontainers.image.licenses=MIT
+
+      # PR builds: single-arch, load locally, scan — never push. Tag builds
+      # that pass the gate: scan the SAME content locally-built first (below),
+      # THEN push multi-arch with SBOM + provenance attached. The gate must
+      # block publish, not run after it (MEDIUM-3).
+      - name: Build (PR / non-publish — load + scan, no push)
+        if: steps.gate.outputs.publish != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:ci
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            SOURCE_REPO_URL=https://github.com/${{ github.repository }}
+            PRODUCT_URL=${{ env.PRODUCT_URL }}
+            IMAGE_VERSION=${{ github.sha }}
+
+      # Phase 8b exit gate (§8.1): boot the just-built image in the ephemeral
+      # CI profile, send SMTP, assert via the current API, prove no leaked
+      # state + the isolation refusal, then tear down — on the loaded :ci image
+      # BEFORE any publish. Needs a Docker host (ubuntu-latest) + python3.
+      # PR/non-publish path only — see "CI-profile e2e (release path...)"
+      # below for the release/publish path's copy of this same gate.
+      - name: CI-profile e2e (PR path — ephemeral SENDTRAP_MODE=ci)
+        if: steps.gate.outputs.publish != 'true'
+        env:
+          SKIP_BUILD: "1"
+          SENDTRAP_IMAGE: ${{ env.IMAGE }}:ci
+        run: scripts/ci-profile-e2e.sh
+
+      # Gate-review batch-2 #3: the DURABLE-profile e2e (install, restart,
+      # 3x-restart idempotency, a REAL upgrade onto a second built image on
+      # the same volume, the APP_KEY-mismatch guard, and the down -v negative
+      # check) was authored but never wired into any workflow — only the
+      # ephemeral CI-profile e2e above ran in CI. Mirrors that step exactly
+      # (SKIP_BUILD + SENDTRAP_IMAGE pointing at the tag just loaded above);
+      # container-e2e.sh builds its own SECOND image internally for the
+      # upgrade step, from this same checkout, needing no core-mirror context
+      # (release-mode CORE_SOURCE=published, same as the primary build).
+      # Needs docker compose + python3, both present on ubuntu-latest.
+      - name: Container e2e (PR path — durable profile, real upgrade)
+        if: steps.gate.outputs.publish != 'true'
+        env:
+          SKIP_BUILD: "1"
+          SENDTRAP_IMAGE: ${{ env.IMAGE }}:ci
+        run: scripts/container-e2e.sh
+
+      # Release path, step 1/2: build the SAME image content single-arch and
+      # load it locally under a scan-only tag (never pushed). This is what
+      # Trivy scans below — no re-derived tag guess, no scan-after-push.
+      - name: Build for scan (release-gated — load locally, not pushed)
+        if: steps.gate.outputs.publish == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:scan-${{ github.sha }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            SOURCE_REPO_URL=https://github.com/${{ github.repository }}
+            PRODUCT_URL=${{ env.PRODUCT_URL }}
+            IMAGE_VERSION=${{ github.ref_name }}
+
+      # Release path's own copy of the Phase 8b exit gate (see the
+      # non-publish "CI-profile e2e" step above for what it proves). The
+      # non-publish step is skipped on this path (its `if` is the inverse),
+      # so without this the exact image that gets scanned + pushed to GHCR
+      # was never CI-profile-e2e'd — a broken CI profile could ship. Runs on
+      # the just-built scan-tagged image, BEFORE the Trivy gate and BEFORE
+      # any push/publish step.
+      - name: CI-profile e2e (release path — ephemeral SENDTRAP_MODE=ci)
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          SKIP_BUILD: "1"
+          SENDTRAP_IMAGE: ${{ env.IMAGE }}:scan-${{ github.sha }}
+        run: scripts/ci-profile-e2e.sh
+
+      # Release path's own copy of the durable-profile e2e (see the PR-path
+      # "Container e2e" step above for what it proves) — same reasoning as
+      # the release path's own CI-profile e2e copy just above: without this,
+      # the exact image that gets scanned + pushed to GHCR was never
+      # container-e2e'd on the release path. Runs on the just-built
+      # scan-tagged image, BEFORE the Trivy gate and BEFORE any push.
+      - name: Container e2e (release path — durable profile, real upgrade)
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          SKIP_BUILD: "1"
+          SENDTRAP_IMAGE: ${{ env.IMAGE }}:scan-${{ github.sha }}
+        run: scripts/container-e2e.sh
+
+      # --- Vulnerability gate: fail on fixable HIGH/CRITICAL BEFORE any push.
+      #     Scans exactly the tag each path just built/loaded locally — no
+      #     re-derived `IMAGE:github.ref_name` guess (that tag never existed:
+      #     the metadata-action's semver pattern strips the `v` prefix that
+      #     github.ref_name carries, so the two never matched).
+      - name: Trivy scan (gate)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ steps.gate.outputs.publish == 'true' && format('{0}:scan-{1}', env.IMAGE, github.sha) || format('{0}:ci', env.IMAGE) }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+
+  # Publish-gated job (gate-review batch-2 #6): only reachable when
+  # build-scan's variable+tag-push gate says publish=='true' (unchanged
+  # logic) AND this job's `environment: release` protection rules (an owner-
+  # configured required reviewer/wait timer on the "release" GitHub
+  # environment) are satisfied. `needs: build-scan` also means the Trivy gate
+  # above must have passed (a failed job blocks its dependents) before any
+  # push is even attempted. Rebuilds from the same checkout rather than
+  # transferring the loaded image between jobs/runners — cache-to/from
+  # type=gha is shared across jobs in the same workflow run, so this reuses
+  # the layers build-scan's scan build already populated instead of
+  # rebuilding from scratch.
+  publish:
+    needs: build-scan
+    if: needs.build-scan.outputs.publish == 'true'
+    environment: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # GHCR push
+      id-token: write        # cosign keyless + provenance (OIDC)
+      attestations: write
+    # IMAGE/PRODUCT_URL come from the workflow-level `env:` above — already
+    # in scope for every job, no need to redeclare them here.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3      # arm64 emulation for buildx
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Reuses the GHA layer cache from build-scan's scan build, so this is a
+      # fast re-tag/push of already-built layers, now fanned out multi-arch
+      # with SBOM + provenance attached, THEN pushed to GHCR.
+      - name: Build + push (multi-arch, SBOM, provenance)
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          sbom: true          # CycloneDX SBOM attestation
+          provenance: mode=max # SLSA provenance attestation
+          tags: ${{ needs.build-scan.outputs.tags }}
+          labels: ${{ needs.build-scan.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            SOURCE_REPO_URL=https://github.com/${{ github.repository }}
+            PRODUCT_URL=${{ env.PRODUCT_URL }}
+            IMAGE_VERSION=${{ github.ref_name }}
+
+      # --- Sign the pushed manifest. cosign keyless via OIDC; no keys are
+      #     generated or stored by this workflow. Consumers verify:
+      #       cosign verify ghcr.io/<owner>/sendtrap-community:<tag> \
+      #         --certificate-identity-regexp '.*' \
+      #         --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (keyless)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"

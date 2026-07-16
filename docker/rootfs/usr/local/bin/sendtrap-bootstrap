@@ -1,0 +1,265 @@
+#!/command/with-contenv sh
+#
+# Sendtrap Community — first-run / every-boot bootstrap oneshot.
+# Runs as root under s6-overlay BEFORE any long-running service starts
+# (php-fpm, nginx, smtp, queue, scheduler all depend on it). It is
+# idempotent: safe to run on every container start.
+#
+# Design references (Plan 06 Phase 7, §4):
+#   1. Resolve APP_KEY   (persist-or-supply, NEVER unconditional key:generate)
+#   2. Prepare /data     (dirs + ownership; no-op if already correct)
+#   3. Resolve env       (image ENV + docker -e, already in with-contenv)
+#   4. package:discover  (writes bootstrap/cache tmpfs — not baked at build)
+#   5. config/route/view:cache  (every boot, AFTER env resolves)
+#   6. sendtrap:install --force (migrates internally; idempotent)
+#
+# The app itself must never write outside /data or the tmpfs scratch
+# (/tmp, /run, /app/bootstrap/cache, /app/storage/framework), so this
+# script chowns exactly those and nothing else.
+
+set -eu
+
+APP_DIR=/app
+DATA_DIR=/data
+APP_USER=sendtrap
+KEY_FILE="${DATA_DIR}/app.key"
+
+log() { printf '[bootstrap] %s\n' "$*"; }
+die() { printf '[bootstrap] FATAL: %s\n' "$*" >&2; exit 1; }
+
+# Run an artisan/php command as the unprivileged app user.
+as_app() { s6-setuidgid "${APP_USER}" "$@"; }
+
+# s6-overlay oneshots start with `/` as their working directory; Dockerfile's
+# WORKDIR is not a safe runtime contract for supervised services. Enter the
+# application before any Artisan command (including first-boot key generation).
+cd "${APP_DIR}" || die "application directory ${APP_DIR} is unavailable"
+
+# ---------------------------------------------------------------------------
+# CI PROFILE (Plan 06 Phase 8b) — SENDTRAP_MODE=ci forks the TAIL of this same
+# oneshot into an ephemeral, non-persistent, deterministic-credential mode for
+# isolated CI jobs. This block runs BEFORE config:cache + install --force +
+# ci-seed so those in-process steps see the CI baseline. Every line here is a
+# no-op in the durable profile (SENDTRAP_MODE unset).
+# ---------------------------------------------------------------------------
+if [ "${SENDTRAP_MODE:-}" = "ci" ]; then
+  # (a) Always-on isolation banner (design §4.2) — unconditional, to stderr,
+  #     so the ephemerality + default-cred + do-not-expose facts land in every
+  #     CI log. This is the WARNING the plan requires (a warning, not a stop).
+  cat >&2 <<'BANNER'
+############################################################
+#  SENDTRAP_MODE=ci — EPHEMERAL, NON-PERSISTENT, TEST-ONLY  #
+#  Uses WELL-KNOWN DEFAULT credentials and stores NO data.  #
+#  NOT for public exposure. NEVER publish :1025 / :8080 to  #
+#  a public interface — bind them only on an isolated CI    #
+#  network.                                                 #
+############################################################
+BANNER
+
+  # (b) Persistent-/data refusal (design §4.2, corrected MEDIUM-B logic) — the
+  #     one genuinely detectable ephemerality failure. Read the fstype backing
+  #     /data from /proc/self/mountinfo (the field after " - "). Refuse ONLY a
+  #     NON-EMPTY, NON-tmpfs backing (a real persistent bind/volume). Empty
+  #     (no separate /data mount ⇒ /data on the container overlay rootfs,
+  #     ephemeral under --rm) and tmpfs both proceed silently.
+  data_fs="$(awk '$5=="/data"{for(i=7;i<=NF;i++)if($i=="-"){print $(i+1);exit}}' \
+              /proc/self/mountinfo 2>/dev/null || true)"
+  if [ -n "${data_fs}" ] && [ "${data_fs}" != "tmpfs" ] \
+     && [ "${SENDTRAP_CI_ACK_PERSISTENT:-}" != "1" ]; then
+    echo "[bootstrap] FATAL: SENDTRAP_MODE=ci but /data is a persistent '${data_fs}' mount." >&2
+    echo "[bootstrap]        Run with --tmpfs /data (or --rm on the overlay), or set SENDTRAP_CI_ACK_PERSISTENT=1." >&2
+    exit 1
+  fi
+
+  # (c) Resolve + EXPORT the CI baseline into THIS bootstrap shell (design
+  #     MEDIUM-2) so the in-process config:cache + install --force + ci-seed
+  #     below read it, AND mirror each value to /run/s6/container_environment/*
+  #     (the same mechanism used for APP_KEY below) so every later s6 longrun
+  #     freezes the identical baseline. export-only would miss the longruns;
+  #     container_environment-only would miss THIS shell — both are required.
+  mkdir -p /run/s6/container_environment
+  ci_env() {
+    # $1=name $2=value — export into this shell AND mirror for the longruns.
+    export "$1=$2"
+    printf '%s' "$2" > "/run/s6/container_environment/$1"
+  }
+  # Fixed CI owner so `install --force` never blocks on missing admin creds.
+  ci_env SENDTRAP_ADMIN_NAME       "${SENDTRAP_ADMIN_NAME:-CI}"
+  ci_env SENDTRAP_ADMIN_EMAIL      "${SENDTRAP_ADMIN_EMAIL:-ci@sendtrap.test}"
+  ci_env SENDTRAP_ADMIN_PASSWORD   "${SENDTRAP_ADMIN_PASSWORD:-ci-password-change-in-real-use}"
+  # Deterministic inbox credentials (the credential contract, §2.3).
+  ci_env SENDTRAP_CI_SMTP_USERNAME "${SENDTRAP_CI_SMTP_USERNAME:-ci}"
+  ci_env SENDTRAP_CI_SMTP_PASSWORD "${SENDTRAP_CI_SMTP_PASSWORD:-ci-smtp-password}"
+  ci_env SENDTRAP_CI_API_TOKEN     "${SENDTRAP_CI_API_TOKEN:-ci-api-token}"
+  ci_env SENDTRAP_CI_PROJECT       "${SENDTRAP_CI_PROJECT:-CI}"
+  ci_env SENDTRAP_CI_INBOX         "${SENDTRAP_CI_INBOX:-ci}"
+  # Forwarding OFF, triple-defended (design §2.3 / LOW-3): D-17 limit 0 +
+  # log mailer (the seeded inbox also carries no auto_forward_to).
+  ci_env MAIL_MAILER               "log"
+  ci_env SENDTRAP_FORWARDS_PER_MONTH "0"
+  # Freeze SENDTRAP_MODE for the longruns (e.g. the scheduler/run mode guard).
+  ci_env SENDTRAP_MODE             "ci"
+
+  # Pin the self-contained backend (gate-review batch-2 #7): CI mode's /data
+  # is ALWAYS tmpfs (enforced by the persistent-/data refusal above), so the
+  # backend MUST be entirely self-contained on that ephemeral SQLite file —
+  # without this, a durable-profile external DB/Redis env (DB_CONNECTION=
+  # mysql, QUEUE_CONNECTION=redis, REDIS_HOST=..., etc., e.g. inherited from
+  # a base image/manifest built for the durable profile) would leak into
+  # SENDTRAP_MODE=ci and violate the "no external services in CI" contract
+  # (design §5.0/§8.1) instead of failing loudly. Every value here matches
+  # what config/database.php, config/queue.php, config/cache.php,
+  # config/session.php and config/filesystems.php actually default to
+  # (env('DB_CONNECTION','sqlite') etc.) — this just makes CI mode ignore any
+  # override of those defaults rather than trusting the caller's env.
+  ci_env DB_CONNECTION              "sqlite"
+  ci_env DB_DATABASE                "${DATA_DIR}/database.sqlite"
+  # DB_URL overrides DB_CONNECTION/host/credentials via Laravel's URL parser,
+  # so the DB_CONNECTION pin above is NOT enough on its own — an inherited
+  # durable DB_URL=mysql://… would redirect CI mode at an external database.
+  # An empty value is ignored by the parser (falsy → no override).
+  ci_env DB_URL                     ""
+  ci_env QUEUE_CONNECTION           "sync"
+  ci_env CACHE_STORE                "file"
+  ci_env SESSION_DRIVER             "file"
+  ci_env FILESYSTEM_DISK            "local"
+  ci_env BROADCAST_CONNECTION       "log"
+  # Neutralize external hosts defensively — nothing above should read these
+  # (sqlite/sync/file/file/local/log all ignore DB_HOST/REDIS_HOST), but a
+  # loopback value is cheap insurance against a future code path that does.
+  ci_env DB_HOST                    "127.0.0.1"
+  ci_env REDIS_HOST                 "127.0.0.1"
+
+  log "CI mode: ephemeral baseline exported (forwarding off, mail=log, fixed CI creds, self-contained sqlite/sync/file backend)"
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Prepare /data (owned by the app user). storage/app is a build-time
+#    symlink into /data/storage/app, so message bodies + the STARTTLS cert
+#    land on the volume (§3.2).
+# ---------------------------------------------------------------------------
+log "preparing ${DATA_DIR}"
+mkdir -p \
+  "${DATA_DIR}/storage/app/private" \
+  "${DATA_DIR}/storage/app/public" \
+  "${DATA_DIR}/storage/app/sendtrap-tls"
+chown -R "${APP_USER}:${APP_USER}" "${DATA_DIR}"
+chmod 700 "${DATA_DIR}/storage/app/sendtrap-tls" || true
+
+# For the default SQLite backend, the DB file must exist before `migrate`
+# (Laravel does not create it). No-op for an external DB_CONNECTION.
+if [ "${DB_CONNECTION:-sqlite}" = "sqlite" ]; then
+  db="${DB_DATABASE:-${DATA_DIR}/database.sqlite}"
+  if [ ! -f "${db}" ]; then
+    as_app touch "${db}"
+    log "created SQLite database at ${db}"
+  fi
+fi
+
+# Writable tmpfs scratch (mounts shadow the image dirs, so recreate the
+# skeleton and hand it to the app user every boot).
+mkdir -p \
+  "${APP_DIR}/bootstrap/cache" \
+  "${APP_DIR}/storage/framework/cache/data" \
+  "${APP_DIR}/storage/framework/views" \
+  "${APP_DIR}/storage/framework/sessions" \
+  /tmp/nginx/client_body \
+  /tmp/nginx/proxy \
+  /tmp/nginx/fastcgi \
+  /tmp/nginx/uwsgi \
+  /tmp/nginx/scgi
+chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}/bootstrap/cache" "${APP_DIR}/storage/framework"
+chown -R "${APP_USER}:${APP_USER}" /tmp/nginx
+
+# ---------------------------------------------------------------------------
+# 1. Resolve APP_KEY — persist-or-supply, with a fail-loud mismatch guard.
+#    Precedence: env APP_KEY  >  persisted /data/app.key  >  generate once.
+# ---------------------------------------------------------------------------
+persisted=""
+if [ -f "${KEY_FILE}" ]; then
+  persisted="$(cat "${KEY_FILE}")"
+fi
+
+if [ -n "${APP_KEY:-}" ]; then
+  # Case 1: env supplied. Guard against a key that does not match the key
+  # that already encrypted data on this volume (would silently break
+  # smtp_password decryption + sessions).
+  if [ -n "${persisted}" ] && [ "${persisted}" != "${APP_KEY}" ]; then
+    die "supplied APP_KEY does not match the key that encrypted existing data at ${KEY_FILE}; refusing to start to avoid making smtp_password/sessions undecryptable. Unset APP_KEY to use the persisted key, or restore the original key."
+  fi
+  RESOLVED_KEY="${APP_KEY}"
+  log "APP_KEY: using env-supplied key"
+  if [ -z "${persisted}" ]; then
+    # Also persist an env-supplied key (idempotent: only when nothing is
+    # persisted yet — the branch above already guarantees persisted equals
+    # APP_KEY in every other case). Closes the silent-rotation hole: if the
+    # operator later removes APP_KEY from the environment, case 2 (load
+    # persisted) fires instead of case 3 (generate a brand-new key), which
+    # would silently invalidate every smtp_password/session on the volume.
+    umask 077
+    printf '%s' "${RESOLVED_KEY}" > "${KEY_FILE}"
+    chown "${APP_USER}:${APP_USER}" "${KEY_FILE}"
+    chmod 600 "${KEY_FILE}"
+    log "APP_KEY: persisted env-supplied key to ${KEY_FILE} (chmod 600)"
+  fi
+elif [ -n "${persisted}" ]; then
+  # Case 2: persisted-key steady state.
+  RESOLVED_KEY="${persisted}"
+  log "APP_KEY: loaded persisted key from ${KEY_FILE}"
+else
+  # Case 3: genuine first boot — generate once and persist.
+  RESOLVED_KEY="$(as_app php artisan key:generate --show --no-ansi)"
+  [ -n "${RESOLVED_KEY}" ] || die "key:generate produced no key"
+  umask 077
+  printf '%s' "${RESOLVED_KEY}" > "${KEY_FILE}"
+  chown "${APP_USER}:${APP_USER}" "${KEY_FILE}"
+  chmod 600 "${KEY_FILE}"
+  log "APP_KEY: generated and persisted to ${KEY_FILE} (chmod 600)"
+fi
+
+# Export the resolved key so (a) the artisan steps below cache it and
+# (b) every later s6 service inherits it via with-contenv.
+export APP_KEY="${RESOLVED_KEY}"
+mkdir -p /run/s6/container_environment
+printf '%s' "${RESOLVED_KEY}" > /run/s6/container_environment/APP_KEY
+
+# ---------------------------------------------------------------------------
+# 4 + 5. Rebuild the discover manifest and compiled caches on the tmpfs,
+#        every boot, AFTER env is resolved. Nothing is baked at build (§1.1).
+# ---------------------------------------------------------------------------
+log "package:discover"
+as_app php artisan package:discover --no-ansi
+log "config:cache / route:cache / view:cache"
+as_app php artisan config:cache --no-ansi
+as_app php artisan route:cache --no-ansi
+as_app php artisan view:cache --no-ansi
+
+# ---------------------------------------------------------------------------
+# 6. Install — migrates internally, creates the single workspace + first
+#    owner. Idempotent: a no-op on every boot after the first. On a FRESH
+#    install --force fails loudly if admin creds are missing (desirable).
+# ---------------------------------------------------------------------------
+log "sendtrap:install --force"
+if ! as_app php artisan sendtrap:install --force --no-ansi \
+      --name="${SENDTRAP_ADMIN_NAME:-}" \
+      --email="${SENDTRAP_ADMIN_EMAIL:-}" \
+      --password="${SENDTRAP_ADMIN_PASSWORD:-}" \
+      --workspace="${SENDTRAP_WORKSPACE_NAME:-Sendtrap}"; then
+  die "sendtrap:install failed. On a fresh volume you MUST provide SENDTRAP_ADMIN_NAME, SENDTRAP_ADMIN_EMAIL and SENDTRAP_ADMIN_PASSWORD."
+fi
+
+# ---------------------------------------------------------------------------
+# 7. CI seed (Plan 06 Phase 8b, §2.1 step 7) — CI mode only. Creates the one
+#    project + inbox with the deterministic SENDTRAP_CI_* credentials exported
+#    above and emits the JSON contract (stdout + /run/sendtrap/ci-contract.json).
+#    Pre-create /run/sendtrap owned by the app user so the (uid-1000) command
+#    can write the secondary file sink; /run is tmpfs.
+# ---------------------------------------------------------------------------
+if [ "${SENDTRAP_MODE:-}" = "ci" ]; then
+  mkdir -p /run/sendtrap
+  chown "${APP_USER}:${APP_USER}" /run/sendtrap
+  log "sendtrap:ci-seed"
+  as_app php artisan sendtrap:ci-seed --no-ansi
+fi
+
+log "bootstrap complete"

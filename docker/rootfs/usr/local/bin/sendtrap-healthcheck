@@ -1,0 +1,46 @@
+#!/bin/sh
+#
+# Sendtrap Community container healthcheck (Plan 06 Phase 7 §5).
+#
+# Asserts BOTH ingestion legs are live, using only tools present on
+# php:8.3-fpm-alpine — there is NO curl binary here, so this uses php itself
+# (file_get_contents for /up, stream_socket_client for the SMTP banner).
+#
+#   1. Web  : HTTP 200 from http://127.0.0.1:8080/up  (framework booted)
+#   2. SMTP : a "220" greeting on 127.0.0.1:${SENDTRAP_SMTP_PORT:-1025}
+#
+# Exit 0 = healthy, non-zero = unhealthy (docker HEALTHCHECK contract).
+
+set -eu
+
+SMTP_PORT="${SENDTRAP_SMTP_PORT:-1025}"
+export SMTP_PORT
+
+exec php -d error_reporting=0 -r '
+    $up = "http://127.0.0.1:8080/up";
+    $ctx = stream_context_create(["http" => ["timeout" => 4, "ignore_errors" => true]]);
+    $body = @file_get_contents($up, false, $ctx);
+    $ok = false;
+    if (isset($http_response_header[0]) && strpos($http_response_header[0], " 200") !== false) {
+        $ok = true;
+    }
+    if (! $ok) {
+        fwrite(STDERR, "healthcheck: /up did not return 200\n");
+        exit(1);
+    }
+
+    $port = (int) (getenv("SMTP_PORT") ?: 1025);
+    $smtp = @stream_socket_client("tcp://127.0.0.1:{$port}", $errno, $errstr, 4);
+    if ($smtp === false) {
+        fwrite(STDERR, "healthcheck: SMTP connect failed: {$errstr}\n");
+        exit(1);
+    }
+    stream_set_timeout($smtp, 4);
+    $line = fgets($smtp, 512);
+    fclose($smtp);
+    if ($line === false || strncmp($line, "220", 3) !== 0) {
+        fwrite(STDERR, "healthcheck: no SMTP 220 banner\n");
+        exit(1);
+    }
+    exit(0);
+'

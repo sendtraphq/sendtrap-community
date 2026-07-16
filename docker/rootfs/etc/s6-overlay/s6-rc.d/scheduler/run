@@ -1,0 +1,10 @@
+#!/command/with-contenv sh
+# Plan 06 Phase 8b (§3.1, LOW-1): drop the scheduler in the ephemeral CI
+# profile. Its only job is the daily mail:prune — pointless for a container
+# that lives seconds-to-minutes and discards all state on teardown. Address
+# the live service by its explicit s6-overlay scandir path (/run/service/
+# scheduler); s6-svc -O marks it run-once/not-restarted, and the exec exits
+# 0 so s6 does not restart-loop it. The durable profile is byte-for-byte the
+# line below.
+if [ "${SENDTRAP_MODE:-}" = "ci" ]; then exec s6-svc -O /run/service/scheduler; fi
+exec s6-setuidgid sendtrap php /app/artisan schedule:work --no-interaction

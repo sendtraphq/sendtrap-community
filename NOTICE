@@ -1,0 +1,19 @@
+Third-party data attribution
+============================
+
+caniemail
+---------
+
+The HTML client-compatibility checks in this application use the caniemail
+email-client support dataset:
+
+  https://www.caniemail.com
+  https://github.com/shellscape/caniemail
+
+The caniemail data is licensed under the Creative Commons Attribution 4.0
+International license (CC-BY-4.0): https://creativecommons.org/licenses/by/4.0/
+
+Modifications: the copy bundled at resources/data/caniemail/features.json is a
+snapshot of the upstream dataset with the per-feature "test_results_url" fields
+removed; it is otherwise unmodified. A fresh copy synced at runtime via
+`php artisan htmlcheck:sync-data` is fetched from upstream unmodified.
