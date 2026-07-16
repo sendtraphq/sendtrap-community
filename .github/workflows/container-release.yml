@@ -73,7 +73,7 @@ jobs:
       tags: ${{ steps.meta.outputs.tags }}
       labels: ${{ steps.meta.outputs.labels }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Decide whether to publish
         id: gate
@@ -86,12 +86,12 @@ jobs:
             echo "publish=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: docker/setup-qemu-action@v3      # arm64 emulation for buildx
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4      # arm64 emulation for buildx
+      - uses: docker/setup-buildx-action@v4
 
       - name: Image metadata (tags + OCI labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
           tags: |
@@ -112,7 +112,7 @@ jobs:
       # block publish, not run after it (MEDIUM-3).
       - name: Build (PR / non-publish — load + scan, no push)
         if: steps.gate.outputs.publish != 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -162,7 +162,7 @@ jobs:
       # Trivy scans below — no re-derived tag guess, no scan-after-push.
       - name: Build for scan (release-gated — load locally, not pushed)
         if: steps.gate.outputs.publish == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -213,11 +213,15 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.gate.outputs.publish == 'true' && format('{0}:scan-{1}', env.IMAGE, github.sha) || format('{0}:ci', env.IMAGE) }}
-          format: table
-          exit-code: "1"
+          format: json
+          output: trivy-results.json
+          exit-code: "0"
           ignore-unfixed: true
           severity: HIGH,CRITICAL
           vuln-type: os,library
+
+      - name: Report + enforce Trivy gate
+        run: bash scripts/trivy-gate.sh trivy-results.json
 
   # Publish-gated job (gate-review batch-2 #6): only reachable when
   # build-scan's variable+tag-push gate says publish=='true' (unchanged
@@ -243,12 +247,12 @@ jobs:
     # IMAGE/PRODUCT_URL come from the workflow-level `env:` above — already
     # in scope for every job, no need to redeclare them here.
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3      # arm64 emulation for buildx
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4      # arm64 emulation for buildx
+      - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -259,7 +263,7 @@ jobs:
       # with SBOM + provenance attached, THEN pushed to GHCR.
       - name: Build + push (multi-arch, SBOM, provenance)
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -281,7 +285,7 @@ jobs:
       #         --certificate-identity-regexp '.*' \
       #         --certificate-oidc-issuer https://token.actions.githubusercontent.com
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4
 
       - name: Sign image (keyless)
         env:
