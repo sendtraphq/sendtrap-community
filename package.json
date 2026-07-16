@@ -6,8 +6,7 @@
     "scripts": {
         "build": "vite build",
         "dev": "vite",
-        "pretest": "php artisan ziggy:generate",
-        "test": "vitest run"
+        "test": "php artisan ziggy:generate && vitest run"
     },
     "dependencies": {
         "axios": "^1.18",

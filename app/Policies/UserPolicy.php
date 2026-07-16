@@ -94,7 +94,7 @@ class UserPolicy
             // UPDATE` is rejected by PostgreSQL (an aggregate can't take a row
             // lock), whereas `SELECT id … FOR UPDATE` is valid on both MySQL
             // and Postgres and takes exactly the locks we need.
-            return $owners->lockForUpdate()->pluck('id')->count() <= 1;
+            return count($owners->lockForUpdate()->pluck('id')->all()) <= 1;
         }
 
         return $owners->count() <= 1;

@@ -12,7 +12,7 @@ import SendLimitBanner from '@sendtrap/core/Components/SendLimitBanner.vue';
 /**
  * Plan 06 Phase 4b design §10.8: the frontend smoke — mounts the package's
  * two page-level components against COMMUNITY's real generated Ziggy route
- * list (`php artisan ziggy:generate`, the npm `pretest` script), so a
+ * list (`php artisan ziggy:generate`, run by the npm `test` script), so a
  * route-name drift between the package components' `route(...)` calls and
  * Community's actual registered routes (§4.8) fails a fast offline test
  * instead of a Ziggy exception in production. Plus §10.12: the

@@ -46,8 +46,10 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      # vitest's pretest hook runs `php artisan ziggy:generate`, so the PHP
-      # app must be installed before the front-end suite.
+      # The test script runs `php artisan ziggy:generate` before Vitest, so
+      # the PHP app must be installed before the front-end suite. Keeping the
+      # generation in `test` (not `pretest`) also works when lifecycle hooks
+      # are disabled with npm's `ignore-scripts` security setting.
       - run: composer install --no-interaction --no-progress
       - run: npm ci
       - run: npm run build
