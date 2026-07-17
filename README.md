@@ -29,14 +29,44 @@ internet access**, and is built on the MIT-licensed
   settings, everything), **member** (manage projects/inboxes and mail), or
   **viewer** (read-only, no SMTP/API credentials visible).
 
-## Requirements
+## Quick start (Docker)
+
+The fastest way to run Community is the official container image: one durable
+container carrying the web UI/API (`:8080`), the SMTP ingestion daemon
+(`:1025`), a queue worker and the scheduler — SQLite and all state on a single
+volume, nothing else to install.
+
+```bash
+ADMIN_PASSWORD="$(openssl rand -base64 15)" && echo "admin password: ${ADMIN_PASSWORD}"
+docker run -d --name sendtrap \
+  -p 80:8080 -p 1025:1025 \
+  -e APP_URL=http://localhost \
+  -e SENDTRAP_ADMIN_NAME="Admin" \
+  -e SENDTRAP_ADMIN_EMAIL="admin@example.com" \
+  -e SENDTRAP_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+  -v sendtrap-data:/data \
+  ghcr.io/sendtraphq/sendtrap-community:latest
+```
+
+Open `APP_URL`, log in as the admin user, and point your application's mailer
+at `smtp://localhost:1025` with the inbox credentials shown in the UI. The
+repo also ships a reference `docker-compose.yml` (hardened: read-only rootfs,
+dropped capabilities) and an **ephemeral CI profile** (`SENDTRAP_MODE=ci` —
+zero-config, deterministic credentials, boots seeded in seconds for test
+jobs). See [docker/README.md](docker/README.md) for the full runbook: build,
+run, backup/restore, upgrade, external MySQL/Postgres/Redis/S3 backends, and
+ready-to-copy CI job examples.
+
+## Running from source
+
+### Requirements
 
 - PHP 8.3+ with the `sqlite3` and `openssl` extensions (sqlite is the default
   database; openssl backs the SMTP server's STARTTLS)
 - Composer
 - Node.js 20+ and npm (to build the front-end assets)
 
-## Quick start
+### Quick start
 
 ```bash
 git clone https://github.com/sendtraphq/sendtrap-community.git
@@ -69,12 +99,6 @@ message pruning. The default `QUEUE_CONNECTION=sync` parses captured mail inline
 in the SMTP daemon, so no separate worker is required; if you expect high ingest
 volume, switch to a real queue (`database`/`redis`) and add a
 `php artisan queue:work` process so ingestion doesn't block the SMTP loop.
-
-A durable, self-hosted container image (single `docker compose up -d`, SQLite
-+ local storage by default, external MySQL/Postgres/Redis/S3 opt-in) and an
-ephemeral CI-oriented profile (`SENDTRAP_MODE=ci`, zero-config, deterministic
-credentials) are both included — see [docker/README.md](docker/README.md) for
-the full runbook (build, run, backup/restore, upgrade, and CI job examples).
 
 ## Configuration
 
