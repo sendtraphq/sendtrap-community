@@ -285,7 +285,9 @@ jobs:
       #         --certificate-identity-regexp '.*' \
       #         --certificate-oidc-issuer https://token.actions.githubusercontent.com
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        # cosign-installer publishes no floating v4 major tag (v4 alone does
+        # not resolve) — pin the exact release.
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign image (keyless)
         env:
