@@ -46,6 +46,10 @@ class Slice8bCiSeedTest extends CommunityTestCase
     /** Install the singleton workspace + owner the way the CI entrypoint does. */
     private function installFresh(): void
     {
+        // The CI entrypoint always runs the installer with SENDTRAP_MODE=ci
+        // set, which suppresses the human-first-run starter project.
+        $this->setEnv('SENDTRAP_MODE', 'ci');
+
         Artisan::call('sendtrap:install', [
             '--force' => true,
             '--name' => 'CI',

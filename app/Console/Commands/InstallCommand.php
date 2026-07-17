@@ -49,9 +49,42 @@ class InstallCommand extends Command
     {
         Artisan::call('migrate', ['--force' => true], $this->output);
 
-        $this->installWorkspace();
+        $workspace = $this->installWorkspace();
+
+        $this->installStarterProject($workspace);
 
         return $this->installOwner();
+    }
+
+    /**
+     * A fresh install gets one project with one inbox, so the first login
+     * lands on visible SMTP/API credentials instead of an empty dashboard.
+     * Skipped as soon as any project exists (including ci-seed's), so
+     * re-runs and existing instances are untouched.
+     */
+    private function installStarterProject(Workspace $workspace): void
+    {
+        // Ephemeral CI instances keep a deterministic shape —
+        // sendtrap:ci-seed owns their only project/inbox.
+        if (env('SENDTRAP_MODE') === 'ci') {
+            $this->components->twoColumnDetail('Starter project', 'skipped (SENDTRAP_MODE=ci)');
+
+            return;
+        }
+
+        if ($workspace->projects()->exists()) {
+            $this->components->twoColumnDetail('Starter project', 'a project already exists — skipping');
+
+            return;
+        }
+
+        $project = $workspace->projects()->create(['name' => 'My app']);
+        $inbox = $project->inboxes()->create(['name' => 'Testing']);
+
+        $this->components->info(
+            "Project \"{$project->name}\" with inbox \"{$inbox->name}\" created — "
+            .'its SMTP and API credentials are on the inbox page.'
+        );
     }
 
     private function installWorkspace(): Workspace

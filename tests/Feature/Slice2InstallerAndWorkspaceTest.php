@@ -61,6 +61,35 @@ class Slice2InstallerAndWorkspaceTest extends CommunityTestCase
         $this->assertSame($workspace->id, InstanceSettings::get('workspace_id'));
     }
 
+    public function test_fresh_install_creates_a_starter_project_with_a_credentialed_inbox(): void
+    {
+        $this->installFresh();
+
+        $workspace = Workspace::query()->first();
+        $this->assertSame(1, $workspace->projects()->count());
+
+        $project = $workspace->projects()->first();
+        $this->assertSame('My app', $project->name);
+        $this->assertSame(1, $project->inboxes()->count());
+
+        $inbox = $project->inboxes()->first();
+        $this->assertSame('Testing', $inbox->name);
+        $this->assertNotEmpty($inbox->smtp_username);
+        $this->assertNotEmpty($inbox->smtp_password);
+        $this->assertNotEmpty($inbox->api_token);
+    }
+
+    public function test_re_running_the_installer_never_duplicates_the_starter_project(): void
+    {
+        $this->installFresh();
+        Workspace::query()->first()->projects()->first()->update(['name' => 'Renamed by user']);
+
+        $this->installFresh();
+
+        $this->assertSame(1, Workspace::query()->first()->projects()->count());
+        $this->assertSame('Renamed by user', Workspace::query()->first()->projects()->value('name'));
+    }
+
     public function test_re_running_the_installer_is_idempotent(): void
     {
         $this->installFresh();

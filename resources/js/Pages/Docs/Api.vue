@@ -82,6 +82,12 @@ const methodClass = (method) => ({
                 <p class="mt-2 font-mono text-xs text-slate-500">
                     Base URL: <code class="rounded bg-slate-100 px-1.5 py-0.5">https://&lt;your-instance&gt;/api/v1</code>
                 </p>
+                <p class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-semibold">
+                    <a href="/docs/api/reference" class="rounded-lg bg-slate-900 px-3 py-1.5 text-white transition hover:bg-slate-700">Interactive reference ↗</a>
+                    <a href="/docs/api/openapi.yaml" class="text-slate-500 transition hover:text-slate-900">OpenAPI 3.1 (YAML)</a>
+                    <a href="/docs/api/openapi.json" class="text-slate-500 transition hover:text-slate-900">JSON</a>
+                    <a href="/docs/api/sendtrap.postman_collection.json" class="text-slate-500 transition hover:text-slate-900">Postman collection</a>
+                </p>
             </header>
 
             <section id="auth">
@@ -236,8 +242,11 @@ const methodClass = (method) => ({
                     <span class="font-mono text-xs">PATCH /messages/{id}</span> with an
                     <span class="font-mono text-xs">is_read</span> boolean marks a message read/unread.
                     <span class="font-mono text-xs">DELETE /messages/{id}</span> deletes one message;
-                    <span class="font-mono text-xs">DELETE /messages</span> clears the whole inbox — the pattern
-                    most CI pipelines want between runs.
+                    <span class="font-mono text-xs">DELETE /messages</span> clears the whole inbox, or — with any
+                    of the list filters (<span class="font-mono text-xs">test_id</span>,
+                    <span class="font-mono text-xs">to</span>, <span class="font-mono text-xs">search</span>,
+                    <span class="font-mono text-xs">subject_contains</span>) — deletes only the matching
+                    messages, so a test run sharing an inbox cleans up its own mail and leaves the rest alone.
                 </p>
             </section>
 
