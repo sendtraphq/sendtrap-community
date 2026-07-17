@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "70fc47d9ba2f074b14b259632e96666d",
+    "content-hash": "6bab24d61b531b47a051ac3fee9e72e6",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -4376,16 +4376,16 @@
         },
         {
             "name": "sendtrap/core",
-            "version": "v0.1.1",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/sendtraphq/sendtrap-core.git",
-                "reference": "854269112d845e276d03f74490ffffc6086a647f"
+                "reference": "420865e61dd8ce450c66b4a99bc0bbd418ec6e99"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/sendtraphq/sendtrap-core/zipball/854269112d845e276d03f74490ffffc6086a647f",
-                "reference": "854269112d845e276d03f74490ffffc6086a647f",
+                "url": "https://api.github.com/repos/sendtraphq/sendtrap-core/zipball/420865e61dd8ce450c66b4a99bc0bbd418ec6e99",
+                "reference": "420865e61dd8ce450c66b4a99bc0bbd418ec6e99",
                 "shasum": ""
             },
             "require": {
@@ -4439,9 +4439,9 @@
             "description": "Sendtrap public core: SMTP ingestion, MIME processing, and the Workspace/Project/Inbox/Message domain, shared across the Community and Cloud distributions.",
             "support": {
                 "issues": "https://github.com/sendtraphq/sendtrap-core/issues",
-                "source": "https://github.com/sendtraphq/sendtrap-core/tree/v0.1.1"
+                "source": "https://github.com/sendtraphq/sendtrap-core/tree/v0.2.0"
             },
-            "time": "2026-07-17T09:38:26+00:00"
+            "time": "2026-07-17T11:57:12+00:00"
         },
         {
             "name": "symfony/clock",
