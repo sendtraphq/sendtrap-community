@@ -51,8 +51,17 @@ docker run -d --name sendtrap \
   ghcr.io/sendtraphq/sendtrap-community:latest
 ```
 
-Open `APP_URL`, log in as the admin user, and point your application's mailer
-at `smtp://localhost:1025` with the inbox credentials shown in the UI. The
+Open `APP_URL`, log in as the admin user, and see a first message straight
+away — no application wiring needed:
+
+```bash
+docker exec sendtrap php artisan sendtrap:send-test
+```
+
+That seeds a rich example message (HTML + text, attachment, inline image,
+BCC, merge tags) into the starter inbox. When you're ready for real mail,
+point your application's mailer at `smtp://localhost:1025` with the inbox
+credentials shown in the UI. The
 repo also ships a reference `docker-compose.yml` (hardened: read-only rootfs,
 dropped capabilities) and an **ephemeral CI profile** (`SENDTRAP_MODE=ci` —
 zero-config, deterministic credentials, boots seeded in seconds for test
@@ -90,7 +99,14 @@ php artisan serve            # web UI on http://localhost:8000
 php artisan mail:smtp-server # SMTP ingestion on port 1025
 ```
 
-Then configure your application to send mail through
+Then seed a first message — no application wiring needed:
+
+```bash
+php artisan sendtrap:send-test            # inject straight into the pipeline
+php artisan sendtrap:send-test --via-smtp # or prove the full SMTP wire
+```
+
+When you're ready for real mail, configure your application to send through
 `smtp://localhost:1025` using the inbox credentials shown in the UI, and
 watch messages appear.
 
