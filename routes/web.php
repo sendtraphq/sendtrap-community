@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\QuickstartController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -9,9 +10,12 @@ use Inertia\Inertia;
 use Laravel\Fortify\Features;
 use Sendtrap\Core\Http\Controllers\MessageController;
 
-Route::get('/', function () {
-    return view('welcome');
-});
+/*
+ * Roadmap quick win #9: an installed instance goes straight to login; a
+ * from-source checkout mid-install gets a live quickstart checklist
+ * instead of the stock framework welcome page.
+ */
+Route::get('/', QuickstartController::class)->name('home');
 
 /*
  * Public docs stubs (Plan 06 Phase 4b design §8 row 31, §11 slice 7):
