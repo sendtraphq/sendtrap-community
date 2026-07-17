@@ -24,6 +24,37 @@ Route::get('/terms', fn () => Inertia::render('Legal/Terms'))->name('terms.show'
 Route::get('/policy', fn () => Inertia::render('Legal/Policy'))->name('policy.show');
 
 /*
+ * API contract + interactive reference — parity with Cloud's /docs/api/*
+ * URLs. The OpenAPI document ships inside the sendtrap/core package (the
+ * single source of truth for both editions); these routes only expose it.
+ * Every route 404s gracefully on a core version that predates the
+ * openapi/ directory (< 0.2), so wiring can ship ahead of the bump.
+ */
+Route::get('/docs/api/reference', function () {
+    abort_unless(file_exists(base_path('vendor/sendtrap/core/openapi/sendtrap.yaml')), 404);
+
+    return view('api-reference');
+})->name('docs.api.reference');
+Route::get('/docs/api/openapi.{format}', function (string $format) {
+    abort_unless(in_array($format, ['yaml', 'json']), 404);
+    $path = base_path('vendor/sendtrap/core/openapi/sendtrap.'.$format);
+    abort_unless(file_exists($path), 404);
+
+    return response()->file($path, [
+        'Content-Type' => $format === 'yaml' ? 'application/yaml; charset=utf-8' : 'application/json',
+    ]);
+})->name('docs.api.contract');
+Route::get('/docs/api/sendtrap.postman_collection.json', function () {
+    $path = base_path('vendor/sendtrap/core/openapi/sendtrap.postman_collection.json');
+    abort_unless(file_exists($path), 404);
+
+    return response()->file($path, [
+        'Content-Type' => 'application/json',
+        'Content-Disposition' => 'attachment; filename="sendtrap.postman_collection.json"',
+    ]);
+})->name('docs.api.postman');
+
+/*
  * The H-5 domain route group (Plan 06 Phase 4b design §4.8) — Community
  * authors this itself; the package's own routes/web.php carries only the
  * public share.* routes. Verbs/URIs mirror the Cloud host's exactly.

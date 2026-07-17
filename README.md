@@ -22,7 +22,10 @@ internet access**, and is built on the MIT-licensed
   checked-in snapshot.
 - **A bearer-token REST API per inbox** — list/filter messages, fetch
   detail/raw/HTML, download attachments, and poll wait-for-message from your
-  test suites.
+  test suites. Documented by an OpenAPI 3.1 contract shipped with the app:
+  browse it interactively at `/docs/api/reference` on your instance, or grab
+  `/docs/api/openapi.yaml` (Postman collection alongside) to import into
+  Postman, Bruno or Insomnia.
 - **Public share links, webhooks and auto-forwarding** for individual
   messages.
 - **A simple role model** — every user is an **owner** (manage users,
