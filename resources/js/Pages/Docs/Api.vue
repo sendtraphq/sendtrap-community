@@ -18,6 +18,7 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 const endpoints = [
     { method: 'GET', path: '/inbox', desc: 'Details about the authenticated inbox' },
     { method: 'GET', path: '/messages', desc: 'List messages (paginated, searchable, filterable, optionally blocking)' },
+    { method: 'POST', path: '/expect', desc: 'Wait, match, assert and diagnose in one request — the recommended testing endpoint' },
     { method: 'POST', path: '/assert', desc: 'Block until a matching message arrives (or timeout), return pass/fail' },
     { method: 'GET', path: '/messages/{id}', desc: 'Full message detail — headers, HTML, text, links, lint checks' },
     { method: 'GET', path: '/messages/{id}/raw', desc: 'Raw RFC 822 source' },
@@ -193,6 +194,15 @@ const methodClass = (method) => ({
                     matched message's <a href="#html-check" class="font-semibold text-brand-600">HTML Check</a>
                     compatibility ratio must be at or above this value, handy for gating a CI run on
                     email-client compatibility, not just on the message arriving.
+                </p>
+                <p class="mt-4 text-sm leading-relaxed text-slate-600">
+                    <span class="font-mono text-xs">POST /expect</span> is the richer successor: separate
+                    <em>match</em> conditions (which message are we waiting for?) from <em>assert</em> conditions
+                    (is its content right?) across subject, recipients, envelope, bodies, headers, links,
+                    attachments and quality checks — and a miss tells you whether nothing arrived, mail arrived
+                    but didn't match, or the right mail arrived with the wrong content. Full request schema and
+                    field/operator matrix in the
+                    <a href="/docs/api/reference" class="font-semibold text-brand-600">interactive reference</a>.
                 </p>
             </section>
 
