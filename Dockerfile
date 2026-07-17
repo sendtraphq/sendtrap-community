@@ -152,6 +152,10 @@ RUN install-php-extensions \
 # PHP extension, so `docker compose exec sendtrap sqlite3 ...` 404'd on
 # /usr/bin/sqlite3). Rolled into the same apk layer as nginx/tzdata/xz.
 RUN set -eux; \
+    # Pull in Alpine security patches published after the php base image was
+    # cut (the Trivy release gate fails on any fixable HIGH/CRITICAL in the
+    # base packages, e.g. c-ares 1.34.6-r0 -> 1.34.8-r0 on alpine 3.24.1).
+    apk upgrade --no-cache; \
     apk add --no-cache nginx sqlite tzdata xz; \
     case "${TARGETARCH:-amd64}" in \
       amd64) S6_ARCH=x86_64 ;; \
