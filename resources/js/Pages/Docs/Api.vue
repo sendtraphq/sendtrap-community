@@ -20,6 +20,7 @@ const endpoints = [
     { method: 'GET', path: '/messages', desc: 'List messages (paginated, searchable, filterable, optionally blocking)' },
     { method: 'POST', path: '/expect', desc: 'Wait, match, assert and diagnose in one request — the recommended testing endpoint' },
     { method: 'POST', path: '/assert', desc: 'Block until a matching message arrives (or timeout), return pass/fail' },
+    { method: 'POST', path: '/messages/{id}/extract', desc: 'Pull verification codes, links, addresses and attachments out of a message' },
     { method: 'GET', path: '/messages/{id}', desc: 'Full message detail — headers, HTML, text, links, lint checks' },
     { method: 'GET', path: '/messages/{id}/raw', desc: 'Raw RFC 822 source' },
     { method: 'GET', path: '/messages/{id}/html', desc: 'Rendered HTML body' },
@@ -200,8 +201,65 @@ const methodClass = (method) => ({
                     <em>match</em> conditions (which message are we waiting for?) from <em>assert</em> conditions
                     (is its content right?) across subject, recipients, envelope, bodies, headers, links,
                     attachments and quality checks — and a miss tells you whether nothing arrived, mail arrived
-                    but didn't match, or the right mail arrived with the wrong content. Full request schema and
-                    field/operator matrix in the
+                    but didn't match, or the right mail arrived with the wrong content. An optional
+                    <span class="font-mono text-xs">extract</span> object additionally pulls named values out of
+                    the matched message in the same request — see
+                    <a href="#extract" class="font-semibold text-brand-600">Extract values</a>. Full request
+                    schema and field/operator matrix in the
+                    <a href="/docs/api/reference" class="font-semibold text-brand-600">interactive reference</a>.
+                </p>
+            </section>
+
+            <section id="extract">
+                <h2 class="text-xl font-bold tracking-tight text-slate-900">Extract values</h2>
+                <p class="mt-2 text-sm leading-relaxed text-slate-600">
+                    Signup-verification, password-reset and magic-link tests all end the same way: fishing a
+                    code or link out of an email. Named extractors do that server-side — no MIME parsing or
+                    HTML regexes in your test. Add an <span class="font-mono text-xs">extract</span> object to
+                    <span class="font-mono text-xs">POST /expect</span> and matching + extraction happen
+                    atomically in one request, or run the same extractors against a message you already have
+                    with <span class="font-mono text-xs">POST /messages/{id}/extract</span>.
+                </p>
+                <pre class="mt-4 overflow-x-auto rounded-xl bg-slate-900 p-4 text-xs leading-relaxed text-slate-200"><code>curl -X POST https://&lt;your-instance&gt;/api/v1/expect \
+  -H "Authorization: Bearer &lt;token&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "match":   [{"field": "to", "op": "contains", "value": "alice@example.com"},
+                {"field": "subject", "op": "contains", "value": "Verify"}],
+    "extract": {
+      "code":        {"type": "code", "near": "verification code"},
+      "verify_link": {"type": "link", "path_prefix": "/verify"}
+    },
+    "wait": {"timeout_ms": 10000},
+    "mode": "strict"
+  }'
+
+# =&gt; { "matched": true, "status": "matched",
+#      "extract": { "code":        { "found": true, "value": "482913", ... },
+#                   "verify_link": { "found": true, "value": { "url": "https://app.example.com/verify?token=abc123",
+#                                                              "text": "Verify my account" } } } }</code></pre>
+                <p class="mt-3 text-xs leading-relaxed text-slate-500">
+                    Five extractor types: <span class="font-mono">code</span> (verification-code helper —
+                    standalone token of a configured length/charset in the visible text; with
+                    <span class="font-mono">near</span>, the token closest to the anchor phrase wins),
+                    <span class="font-mono">link</span> (select by <span class="font-mono">url</span>,
+                    <span class="font-mono">host</span>, <span class="font-mono">path_prefix</span>,
+                    <span class="font-mono">query_param</span>, visible <span class="font-mono">text_contains</span>
+                    or a <span class="font-mono">matches</span> regex — links are returned, never fetched),
+                    <span class="font-mono">regex</span> (bounded capture from text, HTML source, subject or a
+                    named header), <span class="font-mono">address</span> (from/to/cc or the SMTP envelope —
+                    <span class="font-mono">envelope_to</span> catches BCC-only recipients) and
+                    <span class="font-mono">attachment</span> (metadata plus the authenticated download URL).
+                </p>
+                <p class="mt-3 text-xs leading-relaxed text-slate-500">
+                    Results are explicit: <span class="font-mono">found</span> /
+                    <span class="font-mono">not_found</span> / <span class="font-mono">ambiguous</span> — several
+                    distinct matches are never guessed among; pass <span class="font-mono">select</span>
+                    (<span class="font-mono">first | last | all</span>) to choose. Inside
+                    <span class="font-mono">/expect</span>, a missing non-optional value keeps the wait polling
+                    and reports <span class="font-mono">status: extraction_failed</span> (a
+                    <span class="font-mono">422</span> in strict mode). Caps: 10 extractors per request,
+                    256-byte server-delimited regexes. Full option matrix in the
                     <a href="/docs/api/reference" class="font-semibold text-brand-600">interactive reference</a>.
                 </p>
             </section>
