@@ -49,8 +49,9 @@ class QuickstartController extends Controller
     }
 
     /**
+     * A null `done` means "not detectable from here" — shown neutrally.
+     *
      * @return list<array{command: string, detail: string, done: ?bool}>
-     *         `done` null = not detectable from here, shown neutrally.
      */
     private function steps(): array
     {

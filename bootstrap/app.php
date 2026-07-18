@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\DenySearchIndexing;
 use App\Http\Middleware\HandleInertiaRequests;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
@@ -23,7 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('mail:prune')->daily();
     })
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->append(\App\Http\Middleware\DenySearchIndexing::class);
+        $middleware->append(DenySearchIndexing::class);
 
         $middleware->web(append: [
             HandleInertiaRequests::class,
