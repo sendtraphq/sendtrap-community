@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "dc2531b663cb038ddf8cebfbe4437ea1",
+    "content-hash": "e95d07f9b97e79e620b65ddf1e03c971",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -2597,16 +2597,16 @@
         },
         {
             "name": "nette/utils",
-            "version": "v4.1.4",
+            "version": "v4.1.5",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nette/utils.git",
-                "reference": "7da6c396d7ebe142bc857c20479d5e70a5e1aac7"
+                "reference": "b043439dbdf954e6c28b5ea7e34b0100f83165e0"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nette/utils/zipball/7da6c396d7ebe142bc857c20479d5e70a5e1aac7",
-                "reference": "7da6c396d7ebe142bc857c20479d5e70a5e1aac7",
+                "url": "https://api.github.com/repos/nette/utils/zipball/b043439dbdf954e6c28b5ea7e34b0100f83165e0",
+                "reference": "b043439dbdf954e6c28b5ea7e34b0100f83165e0",
                 "shasum": ""
             },
             "require": {
@@ -2626,7 +2626,7 @@
             },
             "suggest": {
                 "ext-gd": "to use Image",
-                "ext-iconv": "to use Strings::webalize(), toAscii(), chr() and reverse()",
+                "ext-iconv": "to use Strings::chr(), ord() and reverse()",
                 "ext-intl": "to use Strings::webalize(), toAscii(), normalize() and compare()",
                 "ext-json": "to use Nette\\Utils\\Json",
                 "ext-mbstring": "to use Strings::lower() etc...",
@@ -2682,9 +2682,9 @@
             ],
             "support": {
                 "issues": "https://github.com/nette/utils/issues",
-                "source": "https://github.com/nette/utils/tree/v4.1.4"
+                "source": "https://github.com/nette/utils/tree/v4.1.5"
             },
-            "time": "2026-05-11T20:49:54+00:00"
+            "time": "2026-07-17T23:02:45+00:00"
         },
         {
             "name": "nikic/php-parser",
@@ -4376,16 +4376,16 @@
         },
         {
             "name": "sendtrap/core",
-            "version": "v0.3.0",
+            "version": "v0.4.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/sendtraphq/sendtrap-core.git",
-                "reference": "cb85afb526750e692d6b6c62bd30cd54d4a46223"
+                "reference": "a85cf5dd33162d6cfcbfc38efa3ed21ec95e87db"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/sendtraphq/sendtrap-core/zipball/cb85afb526750e692d6b6c62bd30cd54d4a46223",
-                "reference": "cb85afb526750e692d6b6c62bd30cd54d4a46223",
+                "url": "https://api.github.com/repos/sendtraphq/sendtrap-core/zipball/a85cf5dd33162d6cfcbfc38efa3ed21ec95e87db",
+                "reference": "a85cf5dd33162d6cfcbfc38efa3ed21ec95e87db",
                 "shasum": ""
             },
             "require": {
@@ -4439,9 +4439,9 @@
             "description": "Sendtrap public core: SMTP ingestion, MIME processing, and the Workspace/Project/Inbox/Message domain, shared across the Community and Cloud distributions.",
             "support": {
                 "issues": "https://github.com/sendtraphq/sendtrap-core/issues",
-                "source": "https://github.com/sendtraphq/sendtrap-core/tree/v0.3.0"
+                "source": "https://github.com/sendtraphq/sendtrap-core/tree/v0.4.0"
             },
-            "time": "2026-07-17T20:28:21+00:00"
+            "time": "2026-07-18T07:09:58+00:00"
         },
         {
             "name": "symfony/clock",
