@@ -32,6 +32,10 @@ jobs:
       # Installs sendtrap/core like any consumer (from the committed lock),
       # continuously proving the clean-clone build.
       - run: composer install --no-interaction --no-progress
+      # Without a .env, phpdotenv's boot-time read warns on every test
+      # (PHPUnit shows hundreds of spurious WARNs). Same first-run fix the
+      # README teaches.
+      - run: cp .env.example .env
       - run: php artisan test
 
   frontend:
@@ -66,6 +70,7 @@ jobs:
           php-version: '8.3'
           coverage: none
       - run: composer install --no-interaction --no-progress
+      - run: cp .env.example .env
       - run: vendor/bin/phpunit tests/Feature/Slice7NoCloudArchTest.php
 
   pint:
