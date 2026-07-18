@@ -23,6 +23,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('mail:prune')->daily();
     })
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->append(\App\Http\Middleware\DenySearchIndexing::class);
+
         $middleware->web(append: [
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
