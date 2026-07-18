@@ -21,8 +21,12 @@ internet access**, and is built on the MIT-licensed
   compatibility scored against the caniemail dataset, fully offline from a
   checked-in snapshot.
 - **A bearer-token REST API per inbox** — list/filter messages, fetch
-  detail/raw/HTML, download attachments, and poll wait-for-message from your
-  test suites. Documented by an OpenAPI 3.1 contract shipped with the app:
+  detail/raw/HTML, download attachments, and drive your test suites with
+  `/expect`: one deterministic request that waits for mail, matches, asserts
+  and — via named extractors, also available on
+  `POST /messages/{id}/extract` — hands back verification codes, magic
+  links, addresses and attachment metadata with no email parsing in the
+  test. Documented by an OpenAPI 3.1 contract shipped with the app:
   browse it interactively at `/docs/api/reference` on your instance, or grab
   `/docs/api/openapi.yaml` (Postman collection alongside) to import into
   Postman, Bruno or Insomnia.
@@ -141,10 +145,10 @@ php artisan migrate
 npm install && npm run build
 ```
 
-`sendtrap/core` is pinned with a `^0.1` constraint and updates through
-`composer update sendtrap/core`. Breaking changes may land in `0.x` minor
-releases (semver 0.x semantics) — read the release notes before a minor
-bump.
+`sendtrap/core` is pinned with a caret constraint on the current minor
+(see `composer.json`) and updates through `composer update sendtrap/core`.
+Breaking changes may land in `0.x` minor releases (semver 0.x semantics) —
+read the release notes before a minor bump.
 
 ## Developing core and Community together
 
