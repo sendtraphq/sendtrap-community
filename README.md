@@ -73,6 +73,10 @@ docker run -d --name sendtrap `
   ghcr.io/sendtraphq/sendtrap-community:latest
 ```
 
+The `SENDTRAP_ADMIN_*` values are read only on the first boot of a fresh
+volume — to re-create the admin with a new password, wipe the state first:
+`docker rm -f sendtrap && docker volume rm sendtrap-data`, then run again.
+
 Open `APP_URL`, log in as the admin user, and see a first message straight
 away — no application wiring needed:
 

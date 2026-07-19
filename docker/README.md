@@ -56,6 +56,13 @@ The required first-run env is `APP_URL` + the three `SENDTRAP_ADMIN_*` values;
 on a fresh volume the container **refuses to start** without them rather than
 create a password-less owner. See `docker/.env.example` for the full surface.
 
+> **The `SENDTRAP_ADMIN_*` values are read only on the first boot of a fresh
+> volume.** The install step is a no-op once the workspace exists, so changing
+> them on a later `docker run` does **not** update the admin user — the
+> password from the first boot stays valid. To start over with new
+> credentials, remove the state volume and boot fresh:
+> `docker rm -f sendtrap && docker volume rm sendtrap-data`.
+
 ## Building the image
 
 **Prerequisite — this is a hard cross-dependency on the `sendtrap/core`
