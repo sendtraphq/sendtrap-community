@@ -55,6 +55,24 @@ docker run -d --name sendtrap \
   ghcr.io/sendtraphq/sendtrap-community:latest
 ```
 
+On Windows (PowerShell):
+
+```powershell
+$bytes = [byte[]]::new(15)
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+$ADMIN_PASSWORD = [Convert]::ToBase64String($bytes)
+Write-Host "admin password: $ADMIN_PASSWORD"
+
+docker run -d --name sendtrap `
+  -p 80:8080 -p 1025:1025 `
+  -e APP_URL=http://localhost `
+  -e SENDTRAP_ADMIN_NAME="Admin" `
+  -e SENDTRAP_ADMIN_EMAIL="admin@example.com" `
+  -e SENDTRAP_ADMIN_PASSWORD=$ADMIN_PASSWORD `
+  -v sendtrap-data:/data `
+  ghcr.io/sendtraphq/sendtrap-community:latest
+```
+
 Open `APP_URL`, log in as the admin user, and see a first message straight
 away — no application wiring needed:
 

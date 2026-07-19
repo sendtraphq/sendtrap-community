@@ -34,6 +34,24 @@ docker run -d --name sendtrap \
   ghcr.io/sendtraphq/sendtrap-community:latest
 ```
 
+On Windows (PowerShell):
+
+```powershell
+$bytes = [byte[]]::new(15)
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+$ADMIN_PASSWORD = [Convert]::ToBase64String($bytes)
+Write-Host "admin password: $ADMIN_PASSWORD"
+
+docker run -d --name sendtrap `
+  -p 80:8080 -p 1025:1025 `
+  -e APP_URL=https://mail.example.com `
+  -e SENDTRAP_ADMIN_NAME="Admin" `
+  -e SENDTRAP_ADMIN_EMAIL="admin@example.com" `
+  -e SENDTRAP_ADMIN_PASSWORD=$ADMIN_PASSWORD `
+  -v sendtrap-data:/data `
+  ghcr.io/sendtraphq/sendtrap-community:latest
+```
+
 The required first-run env is `APP_URL` + the three `SENDTRAP_ADMIN_*` values;
 on a fresh volume the container **refuses to start** without them rather than
 create a password-less owner. See `docker/.env.example` for the full surface.
