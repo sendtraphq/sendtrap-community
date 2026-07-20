@@ -14,6 +14,7 @@ use Inertia\Testing\AssertableInertia;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PragmaRX\Google2FA\Google2FA;
 use Sendtrap\Core\Contracts\WorkspaceContext;
+use Sendtrap\Core\Models\Inbox;
 use Sendtrap\Core\Models\Message;
 use Sendtrap\Core\Models\Workspace;
 use Sendtrap\Core\Testing\Concerns\InteractsWithSmtpServer;
@@ -302,8 +303,11 @@ class Slice7ParityClosureTest extends CommunityTestCase
         $this->installFresh();
         $user = User::factory()->member()->create();
 
+        // A fresh install is a single-inbox instance, so the login lands on
+        // the starter inbox's credential page (LoginResponse; the
+        // landing-selection matrix is pinned in LoginLandingTest).
         $this->post('/login', ['email' => $user->email, 'password' => 'password'])
-            ->assertRedirect('/dashboard');
+            ->assertRedirect(route('inboxes.show', Inbox::query()->sole()));
         $this->assertAuthenticatedAs($user);
 
         $this->post('/logout')->assertRedirect('/');
