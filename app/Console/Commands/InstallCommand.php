@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Support\InstanceSettings;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
+use Sendtrap\Core\Contracts\Entitlements;
 use Sendtrap\Core\Models\Workspace;
 
 use function Laravel\Prompts\password;
@@ -49,9 +50,14 @@ class InstallCommand extends Command
     {
         Artisan::call('migrate', ['--force' => true], $this->output);
 
+        // Decided before installWorkspace() runs: only a run that creates
+        // the workspace is a fresh install — the starter project must never
+        // be provisioned onto a pre-existing instance.
+        $freshInstall = Workspace::query()->doesntExist();
+
         $workspace = $this->installWorkspace();
 
-        $this->installStarterProject($workspace);
+        $this->installStarterProject($workspace, $freshInstall);
 
         return $this->installOwner();
     }
@@ -59,10 +65,16 @@ class InstallCommand extends Command
     /**
      * A fresh install gets one project with one inbox, so the first login
      * lands on visible SMTP/API credentials instead of an empty dashboard.
-     * Skipped as soon as any project exists (including ci-seed's), so
-     * re-runs and existing instances are untouched.
+     *
+     * Provisioned AT MOST ONCE per instance, remembered in settings: the
+     * container reruns this command on every boot, so "no projects" cannot
+     * mean "fresh install" — an operator who deleted their last project
+     * must not have it resurrected on restart. Also subject to the same
+     * entitlement checks as the Projects/Inboxes pages — a configured
+     * limit of 0 blocks the starter too, and its inbox starts at the
+     * configured per-inbox message cap.
      */
-    private function installStarterProject(Workspace $workspace): void
+    private function installStarterProject(Workspace $workspace, bool $freshInstall): void
     {
         // Ephemeral CI instances keep a deterministic shape —
         // sendtrap:ci-seed owns their only project/inbox.
@@ -72,14 +84,49 @@ class InstallCommand extends Command
             return;
         }
 
-        if ($workspace->projects()->exists()) {
-            $this->components->twoColumnDetail('Starter project', 'a project already exists — skipping');
+        if (InstanceSettings::get('starter_project_provisioned')) {
+            $this->components->twoColumnDetail('Starter project', 'already provisioned once — skipping');
+
+            return;
+        }
+
+        // An instance that predates the marker is never fresh: whatever its
+        // project count — zero included, when the operator deleted the last
+        // one before upgrading — its state stands. Record the marker so this
+        // stays settled.
+        if (! $freshInstall || $workspace->projects()->exists()) {
+            InstanceSettings::put('starter_project_provisioned', 1);
+            $this->components->twoColumnDetail(
+                'Starter project',
+                $freshInstall ? 'a project already exists — skipping' : 'existing instance — skipping',
+            );
+
+            return;
+        }
+
+        $plan = app(Entitlements::class)->for($workspace);
+
+        if (! $plan->within('projects', 0) || ! $plan->within('inboxes', 0)) {
+            InstanceSettings::put('starter_project_provisioned', 1);
+            $this->components->twoColumnDetail('Starter project', 'skipped (instance project/inbox limit is 0)');
 
             return;
         }
 
         $project = $workspace->projects()->create(['name' => 'My app']);
-        $inbox = $project->inboxes()->create(['name' => 'Testing']);
+
+        $inboxAttributes = ['name' => 'Testing'];
+
+        // Same starting cap InboxController applies on creation. A strict
+        // null check: a configured 0 is a real (blocking) cap, not "use the
+        // column default".
+        if (($cap = $plan->messagesPerInbox()) !== null) {
+            $inboxAttributes['max_messages'] = $cap;
+        }
+
+        $inbox = $project->inboxes()->create($inboxAttributes);
+
+        InstanceSettings::put('starter_project_provisioned', 1);
 
         $this->components->info(
             "Project \"{$project->name}\" with inbox \"{$inbox->name}\" created — "

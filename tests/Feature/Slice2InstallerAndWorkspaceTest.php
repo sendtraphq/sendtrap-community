@@ -90,6 +90,62 @@ class Slice2InstallerAndWorkspaceTest extends CommunityTestCase
         $this->assertSame('Renamed by user', Workspace::query()->first()->projects()->value('name'));
     }
 
+    public function test_a_deleted_starter_project_is_not_resurrected_by_a_rerun(): void
+    {
+        $this->installFresh();
+        Workspace::query()->first()->projects()->first()->delete();
+
+        // The container reruns the installer on every boot — "no projects
+        // now" must not be read as "fresh install".
+        $this->installFresh();
+
+        $this->assertSame(0, Workspace::query()->first()->projects()->count());
+    }
+
+    public function test_an_upgraded_empty_instance_gets_no_starter(): void
+    {
+        // An instance installed before the provisioned marker existed,
+        // whose operator already deleted every project: the workspace
+        // pre-exists, so a rerun must not read "no projects" as "fresh
+        // install" and resurrect one.
+        $workspace = Workspace::factory()->create();
+        InstanceSettings::put('workspace_id', $workspace->id);
+
+        $this->installFresh();
+
+        $this->assertSame(0, $workspace->projects()->count());
+        $this->assertNotNull(InstanceSettings::get('starter_project_provisioned'));
+    }
+
+    public function test_a_zero_message_cap_is_applied_to_the_starter_inbox(): void
+    {
+        config()->set('sendtrap-community.limits.messages_per_inbox', 0);
+
+        $this->installFresh();
+
+        $inbox = Workspace::query()->first()->projects()->first()->inboxes()->first();
+        $this->assertSame(0, $inbox->max_messages);
+    }
+
+    public function test_starter_provisioning_respects_a_zero_project_limit(): void
+    {
+        config()->set('sendtrap-community.limits.projects', 0);
+
+        $this->installFresh();
+
+        $this->assertSame(0, Workspace::query()->first()->projects()->count());
+    }
+
+    public function test_starter_inbox_starts_at_the_configured_message_cap(): void
+    {
+        config()->set('sendtrap-community.limits.messages_per_inbox', 10);
+
+        $this->installFresh();
+
+        $inbox = Workspace::query()->first()->projects()->first()->inboxes()->first();
+        $this->assertSame(10, $inbox->max_messages);
+    }
+
     public function test_re_running_the_installer_is_idempotent(): void
     {
         $this->installFresh();
