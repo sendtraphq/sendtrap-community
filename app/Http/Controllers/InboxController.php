@@ -50,8 +50,9 @@ class InboxController extends Controller
         );
 
         // New inboxes start at the configured per-inbox message cap (falls
-        // back to the column default when the instance is unlimited).
-        if ($cap = $plan->messagesPerInbox()) {
+        // back to the column default only when the instance is unlimited —
+        // a configured 0 is a real, blocking cap).
+        if (($cap = $plan->messagesPerInbox()) !== null) {
             $validated['max_messages'] = $cap;
         }
 
@@ -122,8 +123,9 @@ class InboxController extends Controller
         $validated['allowed_ips'] = IpAllowList::normalize($request->input('allowed_ips', [])) ?: null;
 
         // Don't let a user raise retention above the instance's per-inbox
-        // cap (workspace-derived — carries over verbatim, §7.2.1).
-        if ($cap = app(Entitlements::class)->for($inbox->project->workspace)->messagesPerInbox()) {
+        // cap (workspace-derived — carries over verbatim, §7.2.1). Strict
+        // null check: a configured 0 still clamps.
+        if (($cap = app(Entitlements::class)->for($inbox->project->workspace)->messagesPerInbox()) !== null) {
             $validated['max_messages'] = min($validated['max_messages'], $cap);
         }
 
