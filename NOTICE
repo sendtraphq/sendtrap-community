@@ -1,6 +1,20 @@
 Third-party data attribution
 ============================
 
+Scalar API Reference
+--------------------
+
+The interactive API reference page vendors the standalone build of
+@scalar/api-reference:
+
+  https://scalar.com
+  https://github.com/scalar/scalar
+
+Scalar is licensed under the MIT license; the full license text is bundled
+next to the vendored build at public/vendor/scalar/LICENSE. The copy at
+public/vendor/scalar/standalone.js is an unmodified upstream release build
+(the version is recorded in its header comment).
+
 caniemail
 ---------
 
