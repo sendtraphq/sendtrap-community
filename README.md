@@ -7,6 +7,12 @@ workspace on your own machine or network, needs **no external account and no
 internet access**, and is built on the MIT-licensed
 [`sendtrap/core`](https://github.com/sendtraphq/sendtrap-core) package.
 
+![The message browser: a captured verification email with HTML preview, source, text, raw and check tabs](docs/screenshots/message-browser.png)
+
+| ![HTML client compatibility check scored against the caniemail dataset](docs/screenshots/html-check.png) | ![Per-inbox SMTP and API credentials with copy-paste code samples](docs/screenshots/inbox-credentials.png) |
+|:--:|:--:|
+| Offline HTML compatibility checks | Per-inbox SMTP + API credentials |
+
 ## What you get
 
 - **An SMTP server that catches instead of sends** — `php artisan
