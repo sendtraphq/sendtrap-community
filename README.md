@@ -5,8 +5,7 @@ application's outgoing mail at it and every message is captured, parsed, and
 browsable — nothing is ever delivered to a real mailbox. It runs as a single
 workspace on your own machine or network, needs **no external account and no
 internet access**, and is built on the MIT-licensed
-[`sendtrap/core`](https://github.com/sendtraphq/sendtrap-core) package
-(`^0.1`).
+[`sendtrap/core`](https://github.com/sendtraphq/sendtrap-core) package.
 
 ## What you get
 
@@ -21,20 +20,68 @@ internet access**, and is built on the MIT-licensed
   compatibility scored against the caniemail dataset, fully offline from a
   checked-in snapshot.
 - **A bearer-token REST API per inbox** — list/filter messages, fetch
-  detail/raw/HTML, download attachments, and drive your test suites with
-  `/expect`: one deterministic request that waits for mail, matches, asserts
-  and — via named extractors, also available on
-  `POST /messages/{id}/extract` — hands back verification codes, magic
-  links, addresses and attachment metadata with no email parsing in the
-  test. Documented by an OpenAPI 3.1 contract shipped with the app:
-  browse it interactively at `/docs/api/reference` on your instance, or grab
-  `/docs/api/openapi.yaml` (Postman collection alongside) to import into
-  Postman, Bruno or Insomnia.
+  detail/raw/HTML, download attachments, and assert on mail from your test
+  suite ([see below](#built-for-test-suites)). Documented by an OpenAPI 3.1
+  contract shipped with the app: browse it interactively at
+  `/docs/api/reference` on your instance, or grab `/docs/api/openapi.yaml`
+  (Postman collection alongside) to import into Postman, Bruno or Insomnia.
 - **Public share links, webhooks and auto-forwarding** for individual
   messages.
 - **A simple role model** — every user is an **owner** (manage users,
   settings, everything), **member** (manage projects/inboxes and mail), or
   **viewer** (read-only, no SMTP/API credentials visible).
+
+## Built for test suites
+
+Asserting on email in CI usually means a dance: poll for the message, parse
+the HTML, dig out the code, hope nothing raced. `POST /api/v1/expect`
+collapses that into **one deterministic request** — it waits server-side for
+a matching message, applies your assertions, extracts what you need, and
+returns a diagnostic that distinguishes *no mail arrived* from *mail arrived
+but didn't match* from *the right mail arrived with the wrong content*. With
+`mode: strict` an unmet expectation is an HTTP 422, so a plain `curl -f`
+fails the CI step with no response parsing at all.
+
+```bash
+# Wait up to 10 s for the signup mail; hand back the code and magic link.
+curl -sf https://sendtrap.example.com/api/v1/expect \
+  -H "Authorization: Bearer $INBOX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "match": [
+      { "field": "to",      "op": "contains", "value": "alice@example.com" },
+      { "field": "subject", "op": "contains", "value": "Verify" }
+    ],
+    "extract": {
+      "code":        { "type": "code", "near": "verification code" },
+      "verify_link": { "type": "link", "path_prefix": "/verify" }
+    },
+    "wait": { "timeout_ms": 10000 },
+    "mode": "strict"
+  }'
+```
+
+The same named extractors are available without the wait on
+`POST /api/v1/messages/{id}/extract`, and the container image has an
+ephemeral CI profile (`SENDTRAP_MODE=ci`) that boots seeded, with
+deterministic credentials, in seconds — see
+[docker/README.md](docker/README.md) for ready-to-copy CI jobs.
+
+## How it compares
+
+- **Mailpit / MailHog** are excellent lightweight catchers: one shared
+  mailbox, instant setup. Sendtrap Community adds structure on top of the
+  same idea — multiple projects and inboxes with their own SMTP credentials
+  and API tokens, user roles, offline deliverability and client-compatibility
+  checks, and a test-suite API (`/expect` + extractors) under a published
+  OpenAPI contract. If a single shared inbox is all you need, they are a
+  great fit; Sendtrap is built for teams and CI pipelines that need
+  isolation and assertions.
+- **Mailtrap** (the hosted service) covers similar ground as SaaS. Community
+  is self-hosted and offline-first: no account, and captured mail never
+  leaves your network. The API also mirrors a subset of the Mailtrap sandbox
+  API, so an existing Mailtrap test helper works after swapping only the
+  base URL and token.
 
 ## Quick start (Docker)
 
